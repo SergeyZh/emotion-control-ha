@@ -1,0 +1,35 @@
+# Пример конфигурации для проверки Фазы 1 (обнаружение CC2500 по SPI).
+# Прошейте на ESP32 и смотрите логи: должны появиться PARTNUM=0x80 и ненулевой VERSION.
+
+esphome:
+  name: emotion-control
+
+esp32:
+  board: esp32dev
+
+logger:
+  level: DEBUG
+
+api:
+ota:
+  platform: esphome
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+external_components:
+  - source:
+      type: local
+      path: components
+
+spi:
+  clk_pin: GPIO18
+  mosi_pin: GPIO23
+  miso_pin: GPIO19
+
+cc2500_emotion:
+  id: emotion
+  cs_pin: GPIO5
+  gdo0_pin: GPIO4
+  remote_id: "68049F25"   # ID пульта; по умолчанию сопряжён с тестовой лампой

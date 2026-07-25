@@ -1,0 +1,56 @@
+# Минимальная конфигурация для стендовой проверки по USB.
+# Без Wi-Fi/API/OTA и без secrets.yaml — логи идут по последовательному порту.
+# Кнопка BOOT (GPIO0) на плате переключает лампу вкл/выкл (Фаза 3, живой тест).
+# Прошивка: esphome run bench.yaml
+
+esphome:
+  name: emotion-bench
+
+esp32:
+  board: esp32dev          # подходит для ESP32 DevKit V1 (ESP-WROOM-32)
+
+logger:
+  level: DEBUG
+
+external_components:
+  - source:
+      type: local
+      path: components
+
+spi:
+  clk_pin: GPIO18
+  mosi_pin: GPIO23
+  miso_pin: GPIO19
+
+cc2500_emotion:
+  id: emotion
+  cs_pin: GPIO5
+  gdo0_pin: GPIO4
+
+globals:
+  - id: lamp_on
+    type: bool
+    restore_value: no
+    initial_value: "false"
+
+binary_sensor:
+  - platform: gpio
+    name: "Boot Button"
+    pin:
+      number: GPIO0
+      mode:
+        input: true
+        pullup: true
+      inverted: true          # BOOT замыкает на GND → нажатие = true
+    filters:
+      - delayed_on: 50ms       # антидребезг
+    on_press:
+      then:
+        - lambda: |-
+            if (id(lamp_on)) {
+              id(emotion).send_off();
+              id(lamp_on) = false;
+            } else {
+              id(emotion).send_on(0x80);   // включить со средней цвет. температурой
+              id(lamp_on) = true;
+            }
