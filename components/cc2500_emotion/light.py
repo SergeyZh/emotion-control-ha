@@ -6,6 +6,7 @@ from esphome.const import (
     CONF_DEFAULT_TRANSITION_LENGTH,
     CONF_GAMMA_CORRECT,
     CONF_OUTPUT_ID,
+    CONF_RESTORE_MODE,
     CONF_WARM_WHITE_COLOR_TEMPERATURE,
 )
 
@@ -42,6 +43,11 @@ CONFIG_SCHEMA = cv.All(
             # We map brightness to discrete levels ourselves; gamma must stay linear
             # so the HA<->level round-trip is exact.
             cv.Optional(CONF_GAMMA_CORRECT, default=1.0): cv.positive_float,
+            # Restore on/off, brightness and color temperature across reboots (the
+            # base light default is ALWAYS_OFF, which loses them).
+            cv.Optional(CONF_RESTORE_MODE, default="RESTORE_DEFAULT_OFF"): cv.enum(
+                light.RESTORE_MODES, upper=True, space="_"
+            ),
         }
     ),
     light.validate_color_temperature_channels,

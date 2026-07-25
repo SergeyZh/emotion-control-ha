@@ -36,6 +36,16 @@ class EmotionControlLight : public light::LightOutput {
   void write_state(light::LightState *state) override {
     this->state_ = state;
 
+    if (!this->initialized_) {
+      // First call is the state restored from flash on boot (restore_mode). Adopt it
+      // into our trackers and let HA show it, but do NOT transmit: the lamp keeps its
+      // own state, and re-sending stale state could override a change made from the
+      // physical remote while the ESP was rebooting.
+      this->initialized_ = true;
+      this->adopt_(state);
+      return;
+    }
+
     if (this->suppress_tx_) {
       // State was set from a received remote command. write_state is deferred to
       // LightState::loop(), so the flag must persist until now (consumed here);
@@ -244,6 +254,7 @@ class EmotionControlLight : public light::LightOutput {
   int last_target_level_{-1};
   bool level_known_{false};
   bool suppress_tx_{false};
+  bool initialized_{false};
   uint32_t ramp_start_{0};
   int ramp_dir_{0};  // 0 = idle, +1 ramping up, -1 ramping down
   uint32_t ramp_full_ms_{1000};  // time for a full min<->max ramp
