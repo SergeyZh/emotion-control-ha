@@ -92,7 +92,22 @@ void CC2500Emotion::setup() {
   } else {
     ESP_LOGE(TAG, "Radio register verification failed - see warnings above.");
     this->mark_failed();
+    return;
   }
+
+  if (this->receive_) {
+    // The captured config has MCSM1 RXOFF_MODE=IDLE, so the chip stops after one
+    // packet. Set RXOFF_MODE=RX (bits[3:2]=11 -> 0x3C) to keep listening.
+    this->write_register_(0x17, 0x3C);
+    this->enter_rx_();
+    ESP_LOGCONFIG(TAG, "Listening for remote commands (RX enabled).");
+  }
+}
+
+void CC2500Emotion::loop() {
+  if (!this->receive_ || this->transmitting_)
+    return;
+  this->poll_rx_();
 }
 
 void CC2500Emotion::dump_config() {
@@ -192,6 +207,7 @@ void CC2500Emotion::send_command_(uint8_t cmd, uint8_t val) {
 
   ESP_LOGD(TAG, "TX cmd=0x%02X val=0x%02X chk=0x%02X (x5)", cmd, val, packet[13]);
 
+  this->transmitting_ = true;
   // Transmit 5 times, exactly like the original remote.
   for (uint8_t rep = 0; rep < 5; rep++) {
     this->strobe_(CC2500_SIDLE);
@@ -200,7 +216,84 @@ void CC2500Emotion::send_command_(uint8_t cmd, uint8_t val) {
     this->strobe_(CC2500_STX);
     this->wait_tx_done_();
   }
-  // MCSM1 TXOFF_MODE=IDLE leaves the chip in IDLE, ready for the next command.
+  // Suppress echo of our own burst, then resume listening (if enabled).
+  if (this->receive_) {
+    this->rx_last_cmd_ = cmd;
+    this->rx_last_val_ = val;
+    this->rx_last_time_ = millis();
+    this->enter_rx_();
+  }
+  this->transmitting_ = false;
+}
+
+void CC2500Emotion::enter_rx_() {
+  this->strobe_(CC2500_SIDLE);
+  this->strobe_(CC2500_SFRX);
+  this->strobe_(CC2500_SRX);
+}
+
+void CC2500Emotion::read_fifo_burst_(uint8_t *buf, uint8_t len) {
+  this->enable();
+  this->transfer_byte(CC2500_RXFIFO | CC2500_READ_SINGLE | CC2500_BURST);
+  for (uint8_t i = 0; i < len; i++)
+    buf[i] = this->transfer_byte(0x00);
+  this->disable();
+}
+
+void CC2500Emotion::poll_rx_() {
+  // RXBYTES can be unstable during active RX (datasheet erratum); read until two
+  // consecutive reads agree.
+  const uint8_t b1 = this->read_status_(CC2500_RXBYTES);
+  const uint8_t b2 = this->read_status_(CC2500_RXBYTES);
+  if (b1 != b2)
+    return;
+
+  if (b2 & 0x80) {  // RX FIFO overflow -> flush and restart RX
+    this->enter_rx_();
+    return;
+  }
+  // A complete frame is 1 (length) + 14 (payload) + 2 (appended RSSI/LQI status).
+  if ((b2 & 0x7F) < 17)
+    return;
+
+  uint8_t buf[17];
+  this->read_fifo_burst_(buf, sizeof(buf));
+  this->process_packet_(buf);
+  // We only need one packet of the remote's 5x burst. Flush the rest and restart
+  // RX so the FIFO can never overflow and the state stays clean.
+  this->enter_rx_();
+}
+
+void CC2500Emotion::process_packet_(const uint8_t *buf) {
+  if (buf[0] != 0x0E)  // length byte must be 14
+    return;
+  if (!(buf[16] & 0x80))  // CRC_OK is bit 7 of the appended LQI status byte
+    return;
+
+  const uint8_t *p = buf + 1;  // 14 on-air bytes: ID:4, cmd, val, 00x6, chk, type
+  if (p[0] != this->remote_id_[0] || p[1] != this->remote_id_[1] || p[2] != this->remote_id_[2] ||
+      p[3] != this->remote_id_[3])
+    return;  // a different remote
+
+  const uint8_t cmd = p[4];
+  const uint8_t val = p[5];
+  const uint8_t expect = 0x7E ^ this->remote_id_[0] ^ this->remote_id_[1] ^ this->remote_id_[2] ^
+                         this->remote_id_[3] ^ cmd ^ val ^ 0x16;
+  if (p[13] != 0x16 || p[12] != expect)
+    return;  // wrong type byte or bad checksum
+
+  // Collapse the remote's 5x repeat burst into one event.
+  const uint32_t now = millis();
+  if (cmd == this->rx_last_cmd_ && val == this->rx_last_val_ && (now - this->rx_last_time_) < 400) {
+    this->rx_last_time_ = now;
+    return;
+  }
+  this->rx_last_cmd_ = cmd;
+  this->rx_last_val_ = val;
+  this->rx_last_time_ = now;
+
+  ESP_LOGI(TAG, "RX from remote: cmd=0x%02X val=0x%02X", cmd, val);
+  // Phase 6b: reflect this into the light state (publish_state, no re-transmit).
 }
 
 void CC2500Emotion::wait_tx_done_() {

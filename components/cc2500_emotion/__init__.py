@@ -11,6 +11,7 @@ MULTI_CONF = True
 
 CONF_GDO0_PIN = "gdo0_pin"
 CONF_REMOTE_ID = "remote_id"
+CONF_RECEIVE = "receive"
 
 cc2500_emotion_ns = cg.esphome_ns.namespace("cc2500_emotion")
 CC2500Emotion = cc2500_emotion_ns.class_(
@@ -39,6 +40,7 @@ CONFIG_SCHEMA = (
             cv.GenerateID(): cv.declare_id(CC2500Emotion),
             cv.Optional(CONF_GDO0_PIN): pins.gpio_input_pin_schema,
             cv.Optional(CONF_REMOTE_ID, default="68049F25"): _validate_remote_id,
+            cv.Optional(CONF_RECEIVE, default=True): cv.boolean,
         }
     )
     .extend(cv.COMPONENT_SCHEMA)
@@ -57,3 +59,5 @@ async def to_code(config):
 
     rid = config[CONF_REMOTE_ID]
     cg.add(var.set_remote_id(rid[0], rid[1], rid[2], rid[3]))
+
+    cg.add(var.set_receive(config[CONF_RECEIVE]))
