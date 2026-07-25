@@ -1,4 +1,5 @@
 #include "cc2500_emotion.h"
+#include "emotion_light.h"
 #include "esphome/core/log.h"
 
 namespace esphome {
@@ -105,9 +106,29 @@ void CC2500Emotion::setup() {
 }
 
 void CC2500Emotion::loop() {
+  // Paced brightness steps run regardless of receive mode.
+  this->service_brightness_queue_();
   if (!this->receive_ || this->transmitting_)
     return;
   this->poll_rx_();
+  if (this->light_ != nullptr)
+    this->light_->update_ramp(millis());
+}
+
+void CC2500Emotion::service_brightness_queue_() {
+  if (this->pending_brightness_steps_ == 0)
+    return;
+  const uint32_t now = millis();
+  if (now - this->last_brightness_step_time_ < this->step_interval_ms_)
+    return;
+  if (this->pending_brightness_steps_ > 0) {
+    this->send_brightness_up();
+    this->pending_brightness_steps_--;
+  } else {
+    this->send_brightness_down();
+    this->pending_brightness_steps_++;
+  }
+  this->last_brightness_step_time_ = now;
 }
 
 void CC2500Emotion::dump_config() {
@@ -186,7 +207,7 @@ bool CC2500Emotion::configure_radio_() {
   return ok;
 }
 
-void CC2500Emotion::send_command_(uint8_t cmd, uint8_t val) {
+void CC2500Emotion::send_command_(uint8_t cmd, uint8_t val, uint8_t repeats) {
   // FIFO layout: [len=0x0E][ID:4][cmd][val][00 x6][chk][type=0x16]. The length
   // byte (0x0E = 14) is not transmitted; the other 14 bytes go on-air.
   uint8_t packet[15];
@@ -205,11 +226,10 @@ void CC2500Emotion::send_command_(uint8_t cmd, uint8_t val) {
                this->remote_id_[3] ^ cmd ^ val ^ 0x16;
   packet[14] = 0x16;
 
-  ESP_LOGD(TAG, "TX cmd=0x%02X val=0x%02X chk=0x%02X (x5)", cmd, val, packet[13]);
+  ESP_LOGD(TAG, "TX cmd=0x%02X val=0x%02X chk=0x%02X (x%u)", cmd, val, packet[13], repeats);
 
   this->transmitting_ = true;
-  // Transmit 5 times, exactly like the original remote.
-  for (uint8_t rep = 0; rep < 5; rep++) {
+  for (uint8_t rep = 0; rep < repeats; rep++) {
     this->strobe_(CC2500_SIDLE);
     this->strobe_(CC2500_SFTX);
     this->write_burst_(CC2500_TXFIFO, packet, sizeof(packet));
@@ -224,6 +244,11 @@ void CC2500Emotion::send_command_(uint8_t cmd, uint8_t val) {
     this->enter_rx_();
   }
   this->transmitting_ = false;
+}
+
+void CC2500Emotion::brightness_step(int direction) {
+  if (this->light_ != nullptr)
+    this->light_->step_brightness(direction);
 }
 
 void CC2500Emotion::enter_rx_() {
@@ -282,9 +307,14 @@ void CC2500Emotion::process_packet_(const uint8_t *buf) {
   if (p[13] != 0x16 || p[12] != expect)
     return;  // wrong type byte or bad checksum
 
-  // Collapse the remote's 5x repeat burst into one event.
+  // Collapse repeats into one event. The remote sends each press as a short burst
+  // (~32 ms spacing) and brightness commands sometimes arrive duplicated. A sliding
+  // window keyed on cmd+val merges these, while distinct presses (>150 ms apart) stay
+  // separate. Held brightness sends 0x10/0x20 (max/min), not a stream of 0x11/0x21, so
+  // there are no legitimately fast repeats to lose. Color-temp rotation changes val and
+  // is therefore never merged.
   const uint32_t now = millis();
-  if (cmd == this->rx_last_cmd_ && val == this->rx_last_val_ && (now - this->rx_last_time_) < 400) {
+  if (cmd == this->rx_last_cmd_ && val == this->rx_last_val_ && (now - this->rx_last_time_) < 150) {
     this->rx_last_time_ = now;
     return;
   }
@@ -293,7 +323,8 @@ void CC2500Emotion::process_packet_(const uint8_t *buf) {
   this->rx_last_time_ = now;
 
   ESP_LOGI(TAG, "RX from remote: cmd=0x%02X val=0x%02X", cmd, val);
-  // Phase 6b: reflect this into the light state (publish_state, no re-transmit).
+  if (this->light_ != nullptr)
+    this->light_->on_remote_command(cmd, val);
 }
 
 void CC2500Emotion::wait_tx_done_() {

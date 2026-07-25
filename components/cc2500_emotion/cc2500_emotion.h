@@ -7,6 +7,8 @@
 namespace esphome {
 namespace cc2500_emotion {
 
+class EmotionControlLight;  // defined in emotion_light.h
+
 // --- SPI header bits (CC2500 datasheet, section 10) ---
 static const uint8_t CC2500_READ_SINGLE = 0x80;  // read bit
 static const uint8_t CC2500_BURST = 0x40;        // burst bit
@@ -55,12 +57,24 @@ class CC2500Emotion : public Component,
   // Emotion Control commands (each transmitted 5x, like the original remote).
   void send_on(uint8_t color_temp) { this->send_command_(0x01, color_temp); }
   void send_off() { this->send_command_(0x02, 0x00); }
-  void send_brightness_up() { this->send_command_(0x11, 0x00); }
-  void send_brightness_down() { this->send_command_(0x21, 0x00); }
+  // Brightness step commands are single-shot on the real remote, so send them once.
+  void send_brightness_up() { this->send_command_(0x11, 0x00, 1); }
+  void send_brightness_down() { this->send_command_(0x21, 0x00, 1); }
   void send_color_temp(uint8_t value) { this->send_command_(0x50, value); }
   void send_pair() { this->send_command_(0x60, 0x00); }
   // Send an arbitrary command/value pair (for experimenting with the protocol).
   void send_raw(uint8_t cmd, uint8_t val) { this->send_command_(cmd, val); }
+
+  // The light platform registers itself here so received remote commands can
+  // update the HA state (Phase 6b).
+  void set_light(EmotionControlLight *light) { this->light_ = light; }
+  // Brightness +/- buttons: step through the light so its tracked level stays in sync.
+  void brightness_step(int direction);
+  // Queue relative brightness steps (signed: + up, - down). They are transmitted one
+  // at a time, `step_interval` apart, so the lamp registers each as a distinct step
+  // instead of collapsing a back-to-back burst into one.
+  void queue_brightness_steps(int steps) { this->pending_brightness_steps_ += steps; }
+  void set_step_interval(uint32_t ms) { this->step_interval_ms_ = ms; }
 
  protected:
   // Low-level SPI helpers.
@@ -75,8 +89,9 @@ class CC2500Emotion : public Component,
   // every config register reads back the value we wrote.
   bool configure_radio_();
 
-  // Build the 14-byte on-air packet for one command and transmit it 5 times.
-  void send_command_(uint8_t cmd, uint8_t val);
+  // Build the 14-byte on-air packet for one command and transmit it `repeats` times
+  // (the remote repeats most commands 5x; brightness steps are single-shot).
+  void send_command_(uint8_t cmd, uint8_t val, uint8_t repeats = 5);
   // Block until the current packet has finished transmitting (chip back in IDLE).
   void wait_tx_done_();
 
@@ -86,7 +101,11 @@ class CC2500Emotion : public Component,
   void process_packet_(const uint8_t *buf);  // validate a 17-byte frame and act on it
   void read_fifo_burst_(uint8_t *buf, uint8_t len);
 
+  // Transmit one queued brightness step if the pacing interval has elapsed.
+  void service_brightness_queue_();
+
   GPIOPin *gdo0_pin_{nullptr};
+  EmotionControlLight *light_{nullptr};
   uint8_t remote_id_[4]{0x68, 0x04, 0x9F, 0x25};
 
   bool receive_{true};
@@ -95,6 +114,11 @@ class CC2500Emotion : public Component,
   uint8_t rx_last_cmd_{0xFF};
   uint8_t rx_last_val_{0xFF};
   uint32_t rx_last_time_{0};
+
+  // Paced brightness step queue (signed: + up, - down).
+  int pending_brightness_steps_{0};
+  uint32_t last_brightness_step_time_{0};
+  uint32_t step_interval_ms_{200};
 };
 
 }  // namespace cc2500_emotion

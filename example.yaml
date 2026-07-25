@@ -43,8 +43,8 @@ light:
     # Диапазон цветовой температуры (по желанию; дефолт 6500K..2700K):
     cold_white_color_temperature: 6500 K
     warm_white_color_temperature: 2700 K
-    # Сколько относительных шагов укладывается в слайдер яркости 0..100%:
-    brightness_steps: 10
+    # Число ступеней яркости лампы (L&S = 5):
+    brightness_levels: 5
 
 button:
   # Сопряжение: лампу в режим обучения, затем нажать эту кнопку.
@@ -53,15 +53,15 @@ button:
     on_press:
       lambda: "id(emotion).send_pair();"
 
-  # Ручные шаги яркости (точный контроль в дополнение к слайдеру).
+  # Шаги яркости (обновляют и состояние в HA, и лампу).
   - platform: template
     name: "Ярче"
     on_press:
-      lambda: "id(emotion).send_brightness_up();"
+      lambda: "id(emotion).brightness_step(1);"
   - platform: template
     name: "Темнее"
     on_press:
-      lambda: "id(emotion).send_brightness_down();"
+      lambda: "id(emotion).brightness_step(-1);"
 
   # «Сырая» команда: cmd и value задаются прямо в HA (поля ниже), без перепрошивки.
   # Удобно искать команду абсолютной яркости — впиши cmd/value и жми «Raw send».

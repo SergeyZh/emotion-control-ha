@@ -12,6 +12,7 @@ MULTI_CONF = True
 CONF_GDO0_PIN = "gdo0_pin"
 CONF_REMOTE_ID = "remote_id"
 CONF_RECEIVE = "receive"
+CONF_STEP_INTERVAL = "step_interval"
 
 cc2500_emotion_ns = cg.esphome_ns.namespace("cc2500_emotion")
 CC2500Emotion = cc2500_emotion_ns.class_(
@@ -41,6 +42,11 @@ CONFIG_SCHEMA = (
             cv.Optional(CONF_GDO0_PIN): pins.gpio_input_pin_schema,
             cv.Optional(CONF_REMOTE_ID, default="68049F25"): _validate_remote_id,
             cv.Optional(CONF_RECEIVE, default=True): cv.boolean,
+            # Pause between consecutive brightness step transmissions, so the lamp
+            # registers each as a distinct step instead of collapsing them.
+            cv.Optional(
+                CONF_STEP_INTERVAL, default="200ms"
+            ): cv.positive_time_period_milliseconds,
         }
     )
     .extend(cv.COMPONENT_SCHEMA)
@@ -61,3 +67,4 @@ async def to_code(config):
     cg.add(var.set_remote_id(rid[0], rid[1], rid[2], rid[3]))
 
     cg.add(var.set_receive(config[CONF_RECEIVE]))
+    cg.add(var.set_step_interval(config[CONF_STEP_INTERVAL]))
