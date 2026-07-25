@@ -6,6 +6,7 @@ from esphome.const import CONF_ID
 
 CODEOWNERS = ["@sergeyzh"]
 DEPENDENCIES = ["spi"]
+AUTO_LOAD = ["light"]
 MULTI_CONF = True
 
 CONF_GDO0_PIN = "gdo0_pin"

@@ -1,11 +1,11 @@
-# Пример конфигурации для проверки Фазы 1 (обнаружение CC2500 по SPI).
-# Прошейте на ESP32 и смотрите логи: должны появиться PARTNUM=0x80 и ненулевой VERSION.
+# Боевой конфиг: светильник L&S в Home Assistant через ESP32 + CC2500.
+# Нужен secrets.yaml с wifi_ssid / wifi_password. Прошивка: esphome run example.yaml
 
 esphome:
   name: emotion-control
 
 esp32:
-  board: esp32dev
+  board: esp32dev          # ESP32 DevKit V1 (ESP-WROOM-32)
 
 logger:
   level: DEBUG
@@ -17,6 +17,8 @@ ota:
 wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
+  fast_connect: On
+  output_power: 9
 
 external_components:
   - source:
@@ -32,4 +34,61 @@ cc2500_emotion:
   id: emotion
   cs_pin: GPIO5
   gdo0_pin: GPIO4
-  remote_id: "68049F25"   # ID пульта; по умолчанию сопряжён с тестовой лампой
+  remote_id: "68049F25"    # по умолчанию сопряжён с тестовой лампой
+
+light:
+  - platform: cc2500_emotion
+    name: "L&S Emotion"
+    cc2500_emotion_id: emotion
+    # Диапазон цветовой температуры (по желанию; дефолт 6500K..2700K):
+    cold_white_color_temperature: 6500 K
+    warm_white_color_temperature: 2700 K
+    # Сколько относительных шагов укладывается в слайдер яркости 0..100%:
+    brightness_steps: 10
+
+button:
+  # Сопряжение: лампу в режим обучения, затем нажать эту кнопку.
+  - platform: template
+    name: "Сопряжение"
+    on_press:
+      lambda: "id(emotion).send_pair();"
+
+  # Ручные шаги яркости (точный контроль в дополнение к слайдеру).
+  - platform: template
+    name: "Ярче"
+    on_press:
+      lambda: "id(emotion).send_brightness_up();"
+  - platform: template
+    name: "Темнее"
+    on_press:
+      lambda: "id(emotion).send_brightness_down();"
+
+  # «Сырая» команда: cmd и value задаются прямо в HA (поля ниже), без перепрошивки.
+  # Удобно искать команду абсолютной яркости — впиши cmd/value и жми «Raw send».
+  - platform: template
+    name: "Raw send"
+    on_press:
+      lambda: |-
+        uint8_t cmd = (uint8_t) strtol(id(raw_cmd).state.c_str(), nullptr, 16);
+        uint8_t val = (uint8_t) strtol(id(raw_val).state.c_str(), nullptr, 16);
+        ESP_LOGI("raw", "send_raw(0x%02X, 0x%02X)", cmd, val);
+        id(emotion).send_raw(cmd, val);
+
+# Редактируемые из HA поля для «Raw send» (hex, напр. 0x11 или просто 11).
+text:
+  - platform: template
+    name: "Raw cmd (hex)"
+    id: raw_cmd
+    optimistic: true
+    restore_value: true
+    initial_value: "0x11"
+    mode: text
+    max_length: 4
+  - platform: template
+    name: "Raw value (hex)"
+    id: raw_val
+    optimistic: true
+    restore_value: true
+    initial_value: "0x00"
+    mode: text
+    max_length: 4

@@ -53,6 +53,8 @@ class CC2500Emotion : public Component,
   void send_brightness_down() { this->send_command_(0x21, 0x00); }
   void send_color_temp(uint8_t value) { this->send_command_(0x50, value); }
   void send_pair() { this->send_command_(0x60, 0x00); }
+  // Send an arbitrary command/value pair (for experimenting with the protocol).
+  void send_raw(uint8_t cmd, uint8_t val) { this->send_command_(cmd, val); }
 
  protected:
   // Low-level SPI helpers.
