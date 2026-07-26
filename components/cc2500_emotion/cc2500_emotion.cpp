@@ -349,13 +349,6 @@ void CC2500Emotion::process_packet_(const uint8_t *buf) {
     return;
   }
 
-  // The sniffer is a wire-level tool, so it sees every frame - including all copies
-  // of a repeat burst. Collapsing them is a policy for the control path below, not
-  // for diagnostics: the number of copies that survive per press is exactly how you
-  // tell a healthy link from a marginal one.
-  if (this->listener_ != nullptr)
-    this->listener_->on_emotion_frame(p, cmd, val, buf[15], buf[16], p);
-
   // Collapse repeats into one event. A remote sends each press as a short burst
   // (~32 ms spacing) and brightness commands sometimes arrive duplicated. A sliding
   // window keyed on ID+cmd+val merges these, while distinct presses (>150 ms apart)
@@ -366,16 +359,26 @@ void CC2500Emotion::process_packet_(const uint8_t *buf) {
   const uint32_t now = millis();
   const bool same_id = p[0] == this->rx_last_id_[0] && p[1] == this->rx_last_id_[1] &&
                        p[2] == this->rx_last_id_[2] && p[3] == this->rx_last_id_[3];
-  if (same_id && cmd == this->rx_last_cmd_ && val == this->rx_last_val_ &&
-      (now - this->rx_last_time_) < 150) {
-    this->rx_last_time_ = now;
-    return;
+  const bool repeat = same_id && cmd == this->rx_last_cmd_ && val == this->rx_last_val_ &&
+                      (now - this->rx_last_time_) < 150;
+  if (!repeat) {
+    for (uint8_t i = 0; i < 4; i++)
+      this->rx_last_id_[i] = p[i];
+    this->rx_last_cmd_ = cmd;
+    this->rx_last_val_ = val;
   }
-  for (uint8_t i = 0; i < 4; i++)
-    this->rx_last_id_[i] = p[i];
-  this->rx_last_cmd_ = cmd;
-  this->rx_last_val_ = val;
   this->rx_last_time_ = now;
+
+  // The sniffer is a wire-level tool, so it sees every frame - including all copies
+  // of a burst; the number that survive per press is how you tell a healthy link from
+  // a marginal one. It gets the repeat flag so it can log everything while firing
+  // automations once per press: a held button sends ~85 frames/s, which would flood
+  // the Home Assistant event bus.
+  if (this->listener_ != nullptr)
+    this->listener_->on_emotion_frame(p, cmd, val, buf[15], buf[16], p, repeat);
+
+  if (repeat)
+    return;  // control path acts once per press
 
   if (!this->has_remote_id_)
     return;  // sniffer-only: nothing to match against

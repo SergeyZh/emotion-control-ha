@@ -211,6 +211,85 @@ text_sensor:
 |---|---|---|
 | `cc2500_emotion_id` | (авто) | Ссылка на хаб `cc2500_emotion`. Приём включается принудительно |
 | `dump_raw` | `false` | Печатать все 14 байт кадра для **каждой** команды (неизвестные печатаются всегда) |
+| `on_frame` | — | Автоматизация на принятый кадр, **один раз на нажатие** (см. «Таблица эфира») |
+
+### Таблица эфира в Home Assistant
+Сниффер отдаёт триггер `on_frame` — он срабатывает **один раз на нажатие** для любого пульта в
+радиусе приёма (повторы серии не дублируются). Из него можно собрать живую таблицу эфира: кто
+нажал, что нажал, когда и с каким сигналом.
+
+Шаг 1 — отправлять событие в шину HA (это уже включено в [`example.yaml`](example.yaml)):
+
+```yaml
+cc2500_emotion_sniffer:
+  id: sniffer
+  cc2500_emotion_id: emotion
+  on_frame:
+    - homeassistant.event:
+        event: esphome.emotion_frame
+        variables:
+          rid: !lambda "return remote_id;"
+          cmd: !lambda "return command;"
+          cname: !lambda "return command_name;"
+          val: !lambda "return value;"
+          sig: !lambda "return rssi;"
+        data_template:
+          remote_id: "{{ rid }}"
+          command: "{{ cmd }}"
+          command_name: "{{ cname }}"
+          value: "{{ val }}"
+          rssi: "{{ sig }}"
+```
+
+Шаг 2 — копить события в атрибутах сущности на стороне HA (`configuration.yaml`). У атрибутов, в
+отличие от `text_sensor`, нет лимита в 255 символов, поэтому таблица может быть полной:
+
+```yaml
+template:
+  - trigger:
+      - platform: event
+        event_type: esphome.emotion_frame
+    sensor:
+      - name: "Emotion эфир"
+        state: "{{ trigger.event.data.remote_id }}"
+        attributes:
+          remotes: >
+            {% set old = this.attributes.get('remotes', {}) %}
+            {% set d = trigger.event.data %}
+            {{ dict(old, **{d.remote_id: {
+                 'command': d.command_name,
+                 'value': d.value,
+                 'rssi': d.rssi,
+                 'last_seen': now().strftime('%H:%M:%S')}}) }}
+```
+
+Шаг 3 — карточка на дашборде:
+
+```yaml
+type: markdown
+content: |
+  | Пульт | Команда | Знач. | RSSI | Слышали |
+  |---|---|---|---|---|
+  {% for id, r in state_attr('sensor.emotion_efir', 'remotes').items() -%}
+  | `{{ id }}` | {{ r.command }} | {{ r.value }} | {{ r.rssi }} dBm | {{ r.last_seen }} |
+  {% endfor %}
+```
+
+Тот же триггер годится и для обычных автоматизаций — например, повесить сценарий HA на кнопку
+чужого пульта, которая никакой лампой не управляет.
+
+⚠️ **Своими событиями это не ограничивается:** `on_frame` срабатывает на все пульты Emotion в
+радиусе приёма. Если нужны только свои, фильтруйте по `remote_id` в условии автоматизации.
+
+### Аргументы `on_frame`
+| Переменная | Тип | Значение |
+|---|---|---|
+| `remote_id` | `std::string` | ID пульта, 8 hex-символов (`"6804F74D"`) |
+| `command` | `uint8_t` | Байт команды |
+| `command_name` | `std::string` | Расшифровка команды или `"UNKNOWN"` |
+| `value` | `uint8_t` | Байт значения |
+| `rssi` | `int` | Уровень сигнала, дБм |
+| `lqi` | `uint8_t` | Счётчик ошибок демодуляции (0 = идеально) |
 
 ### Опции `text_sensor` платформы `cc2500_emotion_sniffer`
 | Опция | Описание |

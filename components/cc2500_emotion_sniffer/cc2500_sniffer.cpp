@@ -56,8 +56,11 @@ void CC2500Sniffer::dump_config() {
   ESP_LOGCONFIG(TAG, "  Press a button on a remote - its ID appears below.");
 }
 
+SnifferFrameTrigger::SnifferFrameTrigger(CC2500Sniffer *parent) { parent->add_frame_trigger(this); }
+
 void CC2500Sniffer::on_emotion_frame(const uint8_t *id, uint8_t cmd, uint8_t val,
-                                     uint8_t rssi_raw, uint8_t lqi, const uint8_t *payload) {
+                                     uint8_t rssi_raw, uint8_t lqi, const uint8_t *payload,
+                                     bool repeat) {
   const char *name = command_name(cmd);
   // LQI is an error count (0 = perfect) and the offset is the carrier mismatch
   // between the sender's crystal and ours - both matter when reception is flaky.
@@ -73,6 +76,18 @@ void CC2500Sniffer::on_emotion_frame(const uint8_t *id, uint8_t cmd, uint8_t val
     ESP_LOGI(TAG, "  raw: %s", format_hex_pretty(payload, 14).c_str());
 
   this->record_remote_(id, rssi_dbm(rssi_raw));
+
+  // Automations fire once per press. Every copy of a burst reaches the log above,
+  // but a held button sends ~85 frames/s and each on_frame action can end up as a
+  // Home Assistant event - that has to be one event per press, not per copy.
+  if (repeat || this->frame_triggers_.empty())
+    return;
+  char id_hex[9];
+  snprintf(id_hex, sizeof(id_hex), "%02X%02X%02X%02X", id[0], id[1], id[2], id[3]);
+  for (auto *trigger : this->frame_triggers_) {
+    trigger->trigger(std::string(id_hex), cmd, std::string(name != nullptr ? name : "UNKNOWN"), val,
+                     rssi_dbm(rssi_raw), static_cast<uint8_t>(lqi & 0x7F));
+  }
 }
 
 void CC2500Sniffer::record_remote_(const uint8_t *id, int rssi_dbm) {

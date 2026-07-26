@@ -17,8 +17,9 @@ class EmotionFrameListener {
   virtual ~EmotionFrameListener() = default;
   // `id` points at the frame's 4 ID bytes, `payload` at all 14 on-air bytes.
   // `rssi_raw` and `lqi` are the status bytes the chip appends after the frame.
+  // `repeat` marks another copy of a press already reported (~150 ms window).
   virtual void on_emotion_frame(const uint8_t *id, uint8_t cmd, uint8_t val, uint8_t rssi_raw,
-                                uint8_t lqi, const uint8_t *payload) = 0;
+                                uint8_t lqi, const uint8_t *payload, bool repeat) = 0;
 };
 
 // --- SPI header bits (CC2500 datasheet, section 10) ---
