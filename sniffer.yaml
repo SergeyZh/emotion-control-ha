@@ -1,0 +1,45 @@
+# Режим прослушивания эфира: узнать ID своего пульта Emotion Control.
+#
+# Прошивка: esphome run sniffer.yaml --device /dev/cu.usbserial-0001
+# Затем последовательно нажимать кнопки на пультах — в логе появятся их ID:
+#
+#   [I][cc2500_emotion_sniffer]: remote 68049F25  cmd=0x01 (on)  val=0x80  RSSI=-38 dBm  LQI=2
+#
+# Свой пульт легко отличить по RSSI: он в руках, поэтому сигнал самый сильный.
+# Найденный ID вписать в `remote_id` боевого конфига (см. example.yaml).
+#
+# Передавать в этом конфиге нечем: `remote_id` не задан, поэтому устройство
+# только слушает. Это осознанно — ID для передачи вы ещё не знаете.
+
+esphome:
+  name: emotion-sniffer
+
+esp32:
+  board: esp32dev          # ESP32 DevKit V1 (ESP-WROOM-32)
+
+logger:
+  # DEBUG нужен: на уровне INFO ESPHome вырезает ESP_LOGCONFIG (CONFIG ниже INFO),
+  # то есть пропадает весь баннер инициализации радио и диагностика приёма.
+  level: DEBUG
+
+external_components:
+  - source:
+      type: local
+      path: components
+
+spi:
+  clk_pin: GPIO18
+  mosi_pin: GPIO23
+  miso_pin: GPIO19
+
+cc2500_emotion:
+  id: emotion
+  cs_pin: GPIO5
+  gdo0_pin: GPIO4
+  # remote_id намеренно не задан — только приём.
+
+cc2500_emotion_sniffer:
+  cc2500_emotion_id: emotion
+  # Печатать все 14 байт кадра для каждой команды. Неизвестные команды
+  # печатаются целиком в любом случае.
+  dump_raw: false

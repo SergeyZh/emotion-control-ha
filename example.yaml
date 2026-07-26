@@ -34,7 +34,25 @@ cc2500_emotion:
   id: emotion
   cs_pin: GPIO5
   gdo0_pin: GPIO4
-  remote_id: "68049F25"    # по умолчанию сопряжён с тестовой лампой
+  # ID вашего пульта, 4 байта hex. Обязателен для передачи; без него устройство
+  # только слушает эфир. Узнать ID своего пульта — прошить sniffer.yaml и нажать
+  # на нём любую кнопку.
+  remote_id: !secret emotion_remote_id
+  # remote_id: "00000000"
+
+# Прослушивание эфира. Не влияет на управление лампой — только логирует кадры
+# и наполняет сущность со списком найденных пультов (ниже).
+cc2500_emotion_sniffer:
+  id: sniffer
+  cc2500_emotion_id: emotion
+
+text_sensor:
+  # Все пульты, услышанные с момента загрузки, с лучшим уровнем сигнала каждого.
+  # Свой пульт — тот, у которого сигнал сильнее: "6804F74D -49dBm, 68049F25 -71dBm".
+  - platform: cc2500_emotion_sniffer
+    cc2500_emotion_sniffer_id: sniffer
+    discovered_remotes:
+      name: "Найденные пульты"
 
 light:
   - platform: cc2500_emotion

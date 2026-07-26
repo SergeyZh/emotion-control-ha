@@ -8,7 +8,8 @@ namespace cc2500_emotion {
 static const char *const TAG = "cc2500_emotion";
 
 // Register map captured from the L&S KZQ-8YKC-K remote (CC2500, 26 MHz crystal).
-// Source: emotion-control-re/captures/PROTOCOL-FINDINGS.md. Loaded verbatim:
+// Source: https://github.com/SergeyZh/emotion-control-re/blob/main/captures/PROTOCOL-FINDINGS.md
+// Loaded verbatim:
 // MSK, 250 kBaud, 2436.2 MHz, sync 0xD391, FEC on, whitening off, hardware CRC.
 struct RegSetting {
   uint8_t addr;
@@ -21,7 +22,13 @@ static const RegSetting CONFIG_REGISTERS[] = {
     {0x03, 0x07},  // FIFOTHR
     {0x04, 0xD3},  // SYNC1
     {0x05, 0x91},  // SYNC0
-    {0x06, 0xFF},  // PKTLEN
+    // PKTLEN: maximum accepted length in variable-length mode. The remote's own value
+    // is 0xFF, which is harmless for a transmitter but bad for us: on a false sync
+    // detection (we sit at 2436.2 MHz, inside the Wi-Fi band) the chip takes the next
+    // noise byte as a length and then waits for up to 255 bytes that never arrive,
+    // going deaf until the FIFO overflows. Emotion frames are always 14 bytes, so
+    // capping here makes the chip discard bogus lengths itself.
+    {0x06, 0x0E},  // PKTLEN (deviates from the captured map on purpose - see above)
     {0x07, 0x04},  // PKTCTRL1
     {0x08, 0x05},  // PKTCTRL0  (variable length, hardware CRC, whitening off)
     {0x09, 0x01},  // ADDR
@@ -101,7 +108,12 @@ void CC2500Emotion::setup() {
     // packet. Set RXOFF_MODE=RX (bits[3:2]=11 -> 0x3C) to keep listening.
     this->write_register_(0x17, 0x3C);
     this->enter_rx_();
-    ESP_LOGCONFIG(TAG, "Listening for remote commands (RX enabled).");
+    // MARCSTATE 0x0D = RX. Anything else means the chip did not actually start
+    // listening, which is otherwise invisible until packets fail to arrive.
+    const uint8_t marcstate = this->read_status_(CC2500_MARCSTATE) & 0x1F;
+    ESP_LOGCONFIG(TAG, "Listening for remote commands (RX enabled, MARCSTATE=0x%02X).", marcstate);
+    if (marcstate != 0x0D)
+      ESP_LOGW(TAG, "Chip is not in RX state (MARCSTATE=0x%02X, expected 0x0D).", marcstate);
   }
 }
 
@@ -133,8 +145,12 @@ void CC2500Emotion::service_brightness_queue_() {
 
 void CC2500Emotion::dump_config() {
   ESP_LOGCONFIG(TAG, "CC2500 Emotion Control:");
-  ESP_LOGCONFIG(TAG, "  Remote ID: %02X %02X %02X %02X", this->remote_id_[0], this->remote_id_[1],
-                this->remote_id_[2], this->remote_id_[3]);
+  if (this->has_remote_id_) {
+    ESP_LOGCONFIG(TAG, "  Remote ID: %02X %02X %02X %02X", this->remote_id_[0],
+                  this->remote_id_[1], this->remote_id_[2], this->remote_id_[3]);
+  } else {
+    ESP_LOGCONFIG(TAG, "  Remote ID: not set - transmit disabled, listening only");
+  }
   LOG_PIN("  CS Pin: ", this->cs_);
   LOG_PIN("  GDO0 Pin: ", this->gdo0_pin_);
   if (this->is_failed()) {
@@ -208,6 +224,11 @@ bool CC2500Emotion::configure_radio_() {
 }
 
 void CC2500Emotion::send_command_(uint8_t cmd, uint8_t val, uint8_t repeats) {
+  if (!this->has_remote_id_) {
+    ESP_LOGE(TAG, "Cannot transmit: no remote_id configured (sniffer-only mode). "
+                  "Set remote_id in the cc2500_emotion block.");
+    return;
+  }
   // FIFO layout: [len=0x0E][ID:4][cmd][val][00 x6][chk][type=0x16]. The length
   // byte (0x0E = 14) is not transmitted; the other 14 bytes go on-air.
   uint8_t packet[15];
@@ -238,6 +259,8 @@ void CC2500Emotion::send_command_(uint8_t cmd, uint8_t val, uint8_t repeats) {
   }
   // Suppress echo of our own burst, then resume listening (if enabled).
   if (this->receive_) {
+    for (uint8_t i = 0; i < 4; i++)
+      this->rx_last_id_[i] = this->remote_id_[i];
     this->rx_last_cmd_ = cmd;
     this->rx_last_val_ = val;
     this->rx_last_time_ = millis();
@@ -274,53 +297,91 @@ void CC2500Emotion::poll_rx_() {
     return;
 
   if (b2 & 0x80) {  // RX FIFO overflow -> flush and restart RX
+    ESP_LOGD(TAG, "RX FIFO overflow, restarting RX");
     this->enter_rx_();
     return;
   }
   // A complete frame is 1 (length) + 14 (payload) + 2 (appended RSSI/LQI status).
-  if ((b2 & 0x7F) < 17)
+  uint8_t available = b2 & 0x7F;
+  if (available < 17)
     return;
 
-  uint8_t buf[17];
-  this->read_fifo_burst_(buf, sizeof(buf));
-  this->process_packet_(buf);
-  // We only need one packet of the remote's 5x burst. Flush the rest and restart
-  // RX so the FIFO can never overflow and the state stays clean.
+  // Drain every complete frame. The remote repeats each press ~5x and those copies
+  // are the protocol's error correction - reading one and flushing the rest threw
+  // that redundancy away, so a single corrupted copy lost the whole press.
+  while (available >= 17) {
+    uint8_t buf[17];
+    this->read_fifo_burst_(buf, sizeof(buf));
+    // Read while still in RX: this is the offset estimate for the packet we just took
+    // out of the FIFO. Re-entering RX below would invalidate it.
+    this->last_freqest_ = this->read_status_(CC2500_FREQEST);
+    this->process_packet_(buf);
+    available -= 17;
+  }
+  // Anything left is a partial frame. Restart RX so a stale fragment can never
+  // misalign the frames that follow.
   this->enter_rx_();
 }
 
 void CC2500Emotion::process_packet_(const uint8_t *buf) {
-  if (buf[0] != 0x0E)  // length byte must be 14
+  // Every rejection is logged: without this, "the radio hears nothing" and "frames
+  // arrive but fail a check" look identical from the log.
+  if (buf[0] != 0x0E) {  // length byte must be 14
+    ESP_LOGD(TAG, "Frame rejected: length byte 0x%02X, expected 0x0E", buf[0]);
     return;
-  if (!(buf[16] & 0x80))  // CRC_OK is bit 7 of the appended LQI status byte
+  }
+  if (!(buf[16] & 0x80)) {  // CRC_OK is bit 7 of the appended LQI status byte
+    ESP_LOGD(TAG, "Frame rejected: CRC failed (LQI=%u, freq offset %+d = %+d kHz)",
+             buf[16] & 0x7F, static_cast<int8_t>(this->last_freqest_),
+             static_cast<int8_t>(this->last_freqest_) * 1587 / 1000);
     return;
+  }
 
   const uint8_t *p = buf + 1;  // 14 on-air bytes: ID:4, cmd, val, 00x6, chk, type
-  if (p[0] != this->remote_id_[0] || p[1] != this->remote_id_[1] || p[2] != this->remote_id_[2] ||
-      p[3] != this->remote_id_[3])
-    return;  // a different remote
-
   const uint8_t cmd = p[4];
   const uint8_t val = p[5];
-  const uint8_t expect = 0x7E ^ this->remote_id_[0] ^ this->remote_id_[1] ^ this->remote_id_[2] ^
-                         this->remote_id_[3] ^ cmd ^ val ^ 0x16;
-  if (p[13] != 0x16 || p[12] != expect)
-    return;  // wrong type byte or bad checksum
+  // The checksum is computed over the ID bytes we just received, so it validates
+  // frames from any remote - which is what lets a sniffer learn an unknown ID.
+  const uint8_t expect = 0x7E ^ p[0] ^ p[1] ^ p[2] ^ p[3] ^ cmd ^ val ^ 0x16;
+  if (p[13] != 0x16 || p[12] != expect) {
+    ESP_LOGD(TAG, "Frame rejected: type 0x%02X (want 0x16), chk 0x%02X (want 0x%02X)", p[13],
+             p[12], expect);
+    return;
+  }
 
-  // Collapse repeats into one event. The remote sends each press as a short burst
+  // The sniffer is a wire-level tool, so it sees every frame - including all copies
+  // of a repeat burst. Collapsing them is a policy for the control path below, not
+  // for diagnostics: the number of copies that survive per press is exactly how you
+  // tell a healthy link from a marginal one.
+  if (this->listener_ != nullptr)
+    this->listener_->on_emotion_frame(p, cmd, val, buf[15], buf[16], p);
+
+  // Collapse repeats into one event. A remote sends each press as a short burst
   // (~32 ms spacing) and brightness commands sometimes arrive duplicated. A sliding
-  // window keyed on cmd+val merges these, while distinct presses (>150 ms apart) stay
-  // separate. Held brightness sends 0x10/0x20 (max/min), not a stream of 0x11/0x21, so
-  // there are no legitimately fast repeats to lose. Color-temp rotation changes val and
-  // is therefore never merged.
+  // window keyed on ID+cmd+val merges these, while distinct presses (>150 ms apart)
+  // stay separate. Held brightness sends 0x10/0x20 (ramp), not a stream of 0x11/0x21,
+  // so there are no legitimately fast repeats to lose. Color-temp rotation changes val
+  // and is therefore never merged. Keyed on ID so two remotes never merge, and so the
+  // echo suppression in send_command_ covers it.
   const uint32_t now = millis();
-  if (cmd == this->rx_last_cmd_ && val == this->rx_last_val_ && (now - this->rx_last_time_) < 150) {
+  const bool same_id = p[0] == this->rx_last_id_[0] && p[1] == this->rx_last_id_[1] &&
+                       p[2] == this->rx_last_id_[2] && p[3] == this->rx_last_id_[3];
+  if (same_id && cmd == this->rx_last_cmd_ && val == this->rx_last_val_ &&
+      (now - this->rx_last_time_) < 150) {
     this->rx_last_time_ = now;
     return;
   }
+  for (uint8_t i = 0; i < 4; i++)
+    this->rx_last_id_[i] = p[i];
   this->rx_last_cmd_ = cmd;
   this->rx_last_val_ = val;
   this->rx_last_time_ = now;
+
+  if (!this->has_remote_id_)
+    return;  // sniffer-only: nothing to match against
+  if (p[0] != this->remote_id_[0] || p[1] != this->remote_id_[1] || p[2] != this->remote_id_[2] ||
+      p[3] != this->remote_id_[3])
+    return;  // a different remote
 
   ESP_LOGI(TAG, "RX from remote: cmd=0x%02X val=0x%02X", cmd, val);
   if (this->light_ != nullptr)

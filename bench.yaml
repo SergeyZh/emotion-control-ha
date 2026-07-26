@@ -1,7 +1,11 @@
 # Минимальная конфигурация для стендовой проверки по USB.
-# Без Wi-Fi/API/OTA и без secrets.yaml — логи идут по последовательному порту.
+# Без Wi-Fi/API/OTA — логи идут по последовательному порту.
 # Кнопка BOOT (GPIO0) на плате переключает лампу вкл/выкл (Фаза 3, живой тест).
 # Прошивка: esphome run bench.yaml
+#
+# Нужен secrets.yaml (он в .gitignore) с ID вашего пульта:
+#   emotion_remote_id: "68049F25"
+# ID своего пульта можно узнать через sniffer.yaml.
 
 esphome:
   name: emotion-bench
@@ -26,6 +30,7 @@ cc2500_emotion:
   id: emotion
   cs_pin: GPIO5
   gdo0_pin: GPIO4
+  remote_id: !secret emotion_remote_id
 
 globals:
   - id: lamp_on

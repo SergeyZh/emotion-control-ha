@@ -40,7 +40,10 @@ CONFIG_SCHEMA = (
         {
             cv.GenerateID(): cv.declare_id(CC2500Emotion),
             cv.Optional(CONF_GDO0_PIN): pins.gpio_input_pin_schema,
-            cv.Optional(CONF_REMOTE_ID, default="68049F25"): _validate_remote_id,
+            # No default on purpose: an ID belongs to a specific remote, and a
+            # shipped default would make every device transmit as someone else's.
+            # Without it the hub only listens (see cc2500_emotion_sniffer).
+            cv.Optional(CONF_REMOTE_ID): _validate_remote_id,
             cv.Optional(CONF_RECEIVE, default=True): cv.boolean,
             # Pause between consecutive brightness step transmissions, so the lamp
             # registers each as a distinct step instead of collapsing them.
@@ -63,8 +66,9 @@ async def to_code(config):
         gdo0 = await cg.gpio_pin_expression(config[CONF_GDO0_PIN])
         cg.add(var.set_gdo0_pin(gdo0))
 
-    rid = config[CONF_REMOTE_ID]
-    cg.add(var.set_remote_id(rid[0], rid[1], rid[2], rid[3]))
+    if CONF_REMOTE_ID in config:
+        rid = config[CONF_REMOTE_ID]
+        cg.add(var.set_remote_id(rid[0], rid[1], rid[2], rid[3]))
 
     cg.add(var.set_receive(config[CONF_RECEIVE]))
     cg.add(var.set_step_interval(config[CONF_STEP_INTERVAL]))
