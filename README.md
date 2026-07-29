@@ -364,7 +364,7 @@ ID вместо клонирования существующего:
 | `example.yaml` | боевой конфиг (Wi-Fi/API/OTA + light + кнопки) |
 | `bench.yaml` | стендовый конфиг (USB, без Wi-Fi; кнопка BOOT переключает лампу) |
 | `sniffer.yaml` | конфиг для поиска ID пульта (только приём) |
-| `datasheets/` | распиновка модуля и даташит CC2500 |
+| `datasheets/` | распиновка, фото и схема модуля CC2500 (полный даташит CC2500 — [здесь](https://github.com/SergeyZh/emotion-control-re/tree/main/datasheets)) |
 | `PLAN.md` | план и статус фаз |
 | `CLAUDE.md` | заметки для ИИ-агентов (грабли, решения, рабочий процесс) |
 
