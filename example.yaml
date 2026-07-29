@@ -11,6 +11,8 @@ logger:
   level: DEBUG
 
 api:
+  encryption:
+    key: !secret emotion_control__encryption_key
 ota:
   platform: esphome
 
@@ -21,9 +23,9 @@ wifi:
   output_power: 9
 
 external_components:
-  - source:
-      type: local
-      path: components
+  - source: github://SergeyZh/emotion-control-ha/
+    refresh: 0s
+    components: [ cc2500_emotion, cc2500_emotion_sniffer ]
 
 spi:
   clk_pin: GPIO18
@@ -47,7 +49,7 @@ cc2500_emotion_sniffer:
   cc2500_emotion_id: emotion
   # Событие в шину Home Assistant на КАЖДОЕ нажатие любого пульта в радиусе приёма
   # (повторы серии не дублируются). Из этого в HA строится живая таблица эфира —
-  # рецепт в README, раздел «Таблица эфира в Home Assistant».
+  # рецепт в SNIFFER.md, раздел «Таблица эфира в Home Assistant».
   on_frame:
     - homeassistant.event:
         event: esphome.emotion_frame
@@ -128,3 +130,4 @@ text:
     initial_value: "0x00"
     mode: text
     max_length: 4
+
