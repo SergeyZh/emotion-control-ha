@@ -1,17 +1,17 @@
-# Минимальная конфигурация для стендовой проверки по USB.
-# Без Wi-Fi/API/OTA — логи идут по последовательному порту.
-# Кнопка BOOT (GPIO0) на плате переключает лампу вкл/выкл (Фаза 3, живой тест).
-# Прошивка: esphome run bench.yaml
+# Minimal configuration for bench testing over USB.
+# No Wi-Fi/API/OTA - logs go over the serial port.
+# The BOOT button (GPIO0) on the board toggles the lamp on/off (phase 3, live test).
+# Flash with: esphome run bench.yaml
 #
-# Нужен secrets.yaml (он в .gitignore) с ID вашего пульта:
+# Needs secrets.yaml (it is in .gitignore) with your remote's ID:
 #   emotion_remote_id: "68049F25"
-# ID своего пульта можно узнать через sniffer.yaml.
+# You can find your remote's ID with sniffer.yaml.
 
 esphome:
   name: emotion-bench
 
 esp32:
-  board: esp32dev          # подходит для ESP32 DevKit V1 (ESP-WROOM-32)
+  board: esp32dev          # suitable for the ESP32 DevKit V1 (ESP-WROOM-32)
 
 logger:
   level: DEBUG
@@ -46,9 +46,9 @@ binary_sensor:
       mode:
         input: true
         pullup: true
-      inverted: true          # BOOT замыкает на GND → нажатие = true
+      inverted: true          # BOOT pulls to GND -> pressed = true
     filters:
-      - delayed_on: 50ms       # антидребезг
+      - delayed_on: 50ms       # debounce
     on_press:
       then:
         - lambda: |-
@@ -56,6 +56,6 @@ binary_sensor:
               id(emotion).send_off();
               id(lamp_on) = false;
             } else {
-              id(emotion).send_on(0x80);   // включить со средней цвет. температурой
+              id(emotion).send_on(0x80);   // turn on at mid color temperature
               id(lamp_on) = true;
             }

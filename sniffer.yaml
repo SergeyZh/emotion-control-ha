@@ -1,15 +1,16 @@
-# Режим прослушивания эфира: узнать ID своего пульта Emotion Control.
+# Listen-only mode: find the ID of your own Emotion Control remote.
 #
-# Прошивка: esphome run sniffer.yaml --device /dev/cu.usbserial-0001
-# Затем последовательно нажимать кнопки на пультах — в логе появятся их ID:
+# Flash with: esphome run sniffer.yaml --device /dev/cu.usbserial-0001
+# Then press buttons on your remotes one by one - their IDs show up in the log:
 #
 #   [I][cc2500_emotion_sniffer]: remote 68049F25  cmd=0x01 (on)  val=0x80  RSSI=-38 dBm  LQI=2
 #
-# Свой пульт легко отличить по RSSI: он в руках, поэтому сигнал самый сильный.
-# Найденный ID вписать в `remote_id` боевого конфига (см. example.yaml).
+# Your own remote is easy to tell apart by RSSI: it is in your hand, so its
+# signal is the strongest. Put the ID you found into `remote_id` of the
+# production config (see example.yaml).
 #
-# Передавать в этом конфиге нечем: `remote_id` не задан, поэтому устройство
-# только слушает. Это осознанно — ID для передачи вы ещё не знаете.
+# There is nothing to transmit with in this config: `remote_id` is unset, so the
+# device only listens. That is deliberate - you do not know the ID yet.
 
 esphome:
   name: emotion-sniffer
@@ -18,8 +19,9 @@ esp32:
   board: esp32dev          # ESP32 DevKit V1 (ESP-WROOM-32)
 
 logger:
-  # DEBUG нужен: на уровне INFO ESPHome вырезает ESP_LOGCONFIG (CONFIG ниже INFO),
-  # то есть пропадает весь баннер инициализации радио и диагностика приёма.
+  # DEBUG is required: at INFO level ESPHome strips ESP_LOGCONFIG (CONFIG is
+  # below INFO), which removes the whole radio init banner and the reception
+  # diagnostics.
   level: DEBUG
 
 external_components:
@@ -36,10 +38,10 @@ cc2500_emotion:
   id: emotion
   cs_pin: GPIO5
   gdo0_pin: GPIO4
-  # remote_id намеренно не задан — только приём.
+  # remote_id deliberately unset - receive only.
 
 cc2500_emotion_sniffer:
   cc2500_emotion_id: emotion
-  # Печатать все 14 байт кадра для каждой команды. Неизвестные команды
-  # печатаются целиком в любом случае.
+  # Print all 14 frame bytes for every command. Unknown commands are printed
+  # in full regardless.
   dump_raw: false

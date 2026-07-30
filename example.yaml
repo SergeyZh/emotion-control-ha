@@ -1,5 +1,5 @@
-# Боевой конфиг: светильник L&S в Home Assistant через ESP32 + CC2500.
-# Нужен secrets.yaml с wifi_ssid / wifi_password. Прошивка: esphome run example.yaml
+# Production config: an L&S light in Home Assistant via ESP32 + CC2500.
+# Needs secrets.yaml with wifi_ssid / wifi_password. Flash with: esphome run example.yaml
 
 esphome:
   name: emotion-control
@@ -10,9 +10,10 @@ esp32:
 logger:
   level: DEBUG
 
+# To encrypt the Home Assistant connection, add an `encryption:` block here with
+# a 32-byte base64 key and put that key into secrets.yaml.
 api:
-  encryption:
-    key: !secret emotion_control__encryption_key
+
 ota:
   platform: esphome
 
@@ -36,20 +37,20 @@ cc2500_emotion:
   id: emotion
   cs_pin: GPIO5
   gdo0_pin: GPIO4
-  # ID вашего пульта, 4 байта hex. Обязателен для передачи; без него устройство
-  # только слушает эфир. Узнать ID своего пульта — прошить sniffer.yaml и нажать
-  # на нём любую кнопку.
+  # Your remote's ID, 4 bytes hex. Required for transmitting; without it the
+  # device only listens to the air. To find your remote's ID, flash sniffer.yaml
+  # and press any button on it.
   remote_id: !secret emotion_remote_id
   # remote_id: "00000000"
 
-# Прослушивание эфира. Не влияет на управление лампой — только логирует кадры
-# и наполняет сущность со списком найденных пультов (ниже).
+# Listening to the air. Does not affect lamp control - it only logs frames and
+# fills the entity listing discovered remotes (below).
 cc2500_emotion_sniffer:
   id: sniffer
   cc2500_emotion_id: emotion
-  # Событие в шину Home Assistant на КАЖДОЕ нажатие любого пульта в радиусе приёма
-  # (повторы серии не дублируются). Из этого в HA строится живая таблица эфира —
-  # рецепт в SNIFFER.md, раздел «Таблица эфира в Home Assistant».
+  # An event onto the Home Assistant bus for EVERY press of any remote in range
+  # (repeats within a burst are not duplicated). A live air table is built from
+  # this in HA - recipe in SNIFFER.md, section "A live air table in Home Assistant".
   on_frame:
     - homeassistant.event:
         event: esphome.emotion_frame
@@ -67,42 +68,43 @@ cc2500_emotion_sniffer:
           rssi: "{{ sig }}"
 
 text_sensor:
-  # Все пульты, услышанные с момента загрузки, с лучшим уровнем сигнала каждого.
-  # Свой пульт — тот, у которого сигнал сильнее: "6804F74D -49dBm, 68049F25 -71dBm".
+  # Every remote heard since boot, each with its best signal level.
+  # Your own remote is the one with the stronger signal: "6804F74D -49dBm, 68049F25 -71dBm".
   - platform: cc2500_emotion_sniffer
     cc2500_emotion_sniffer_id: sniffer
     discovered_remotes:
-      name: "Найденные пульты"
+      name: "Discovered remotes"
 
 light:
   - platform: cc2500_emotion
     name: "L&S Emotion"
     cc2500_emotion_id: emotion
-    # Диапазон цветовой температуры (по желанию; дефолт 6500K..2700K):
+    # Color temperature range (optional; defaults to 6500K..2700K):
     cold_white_color_temperature: 6500 K
     warm_white_color_temperature: 2700 K
-    # Число ступеней яркости лампы (L&S = 5):
+    # Number of brightness levels the lamp has (L&S = 5):
     brightness_levels: 5
 
 button:
-  # Сопряжение: лампу в режим обучения, затем нажать эту кнопку.
+  # Pairing: put the lamp into learning mode, then press this button.
   - platform: template
-    name: "Сопряжение"
+    name: "Pair"
     on_press:
       lambda: "id(emotion).send_pair();"
 
-  # Шаги яркости (обновляют и состояние в HA, и лампу).
+  # Brightness steps (they update both Home Assistant state and the lamp).
   - platform: template
-    name: "Ярче"
+    name: "Brighter"
     on_press:
       lambda: "id(emotion).brightness_step(1);"
   - platform: template
-    name: "Темнее"
+    name: "Dimmer"
     on_press:
       lambda: "id(emotion).brightness_step(-1);"
 
-  # «Сырая» команда: cmd и value задаются прямо в HA (поля ниже), без перепрошивки.
-  # Удобно искать команду абсолютной яркости — впиши cmd/value и жми «Raw send».
+  # Raw command: cmd and value are typed straight into Home Assistant (fields
+  # below), no reflashing. Handy for hunting an absolute-brightness command -
+  # enter cmd/value and hit "Raw send".
   - platform: template
     name: "Raw send"
     on_press:
@@ -112,7 +114,7 @@ button:
         ESP_LOGI("raw", "send_raw(0x%02X, 0x%02X)", cmd, val);
         id(emotion).send_raw(cmd, val);
 
-# Редактируемые из HA поля для «Raw send» (hex, напр. 0x11 или просто 11).
+# Fields editable from Home Assistant for "Raw send" (hex, e.g. 0x11 or just 11).
 text:
   - platform: template
     name: "Raw cmd (hex)"
@@ -130,4 +132,3 @@ text:
     initial_value: "0x00"
     mode: text
     max_length: 4
-
