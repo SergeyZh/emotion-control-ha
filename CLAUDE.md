@@ -1,169 +1,210 @@
-# CLAUDE.md — заметки для агентов
+# CLAUDE.md — notes for agents
 
-Проект: устройство **ESPHome `light`** для управления светильниками **L&S Emotion Control**
-через модуль **CC2500** (2.4 ГГц), подключённый к ESP32 по SPI. Общий план и статус фаз — в
+Project: an **ESPHome `light`** device for controlling **L&S Emotion Control** lights through a
+**CC2500** module (2.4 GHz) attached to an ESP32 over SPI. Overall plan and phase status — in
 [`PLAN.md`](PLAN.md).
 
-## Источник протокола
-Радиопротокол полностью расшифрован в репозитории **<https://github.com/SergeyZh/emotion-control-re>**.
-Ключевой документ — <https://github.com/SergeyZh/emotion-control-re/blob/main/captures/PROTOCOL-FINDINGS.md> (карта регистров CC2500,
-формат пакета, команды). Не переизобретать протокол — брать оттуда.
+This file is **English only** — it is not translated. Everything else in the docs is trilingual, see
+"Multilingual documentation" below.
 
-## Железо
+## Multilingual documentation
+The project ships documentation in **English (primary), Russian and German**. Naming: `NAME.md` is
+English, `NAME.ru.md` Russian, `NAME.de.md` German. Currently: `README`, `GETTING-STARTED`,
+`CONFIGURATION`, `SNIFFER`, `PLAN`.
+
+Rules when touching documentation:
+- **English is the source of truth.** Write or update it first, then port the same change to `.ru.md`
+  and `.de.md`.
+- **All three languages must stay in sync.** A change that lands in only one language is an incomplete
+  change — never leave the other two stale. This includes adding a new document: it needs all three
+  variants from the start.
+- **Every doc starts with the language badge header** linking its own three variants, e.g. for
+  `README`:
+  ```markdown
+  [![en](https://img.shields.io/badge/lang-en-blue.svg)](README.md)
+  [![ru](https://img.shields.io/badge/lang-ru-green.svg)](README.ru.md)
+  [![de](https://img.shields.io/badge/lang-de-yellow.svg)](README.de.md)
+  ```
+- **Cross-links stay inside their language.** `README.de.md` links to `CONFIGURATION.de.md`, not to
+  the English one. Anchor links must match the translated headings (`#features-and-limitations` in
+  English vs `#eigenschaften-und-einschränkungen` in German), so verify anchors after translating a
+  heading.
+- Exceptions, deliberately not translated: this file (`CLAUDE.md`), `datasheets/` (English technical
+  reference), YAML comments in configs (currently Russian) and the source code (English).
+- Translate terminology consistently: remote / Fernbedienung / пульт, lamp / Leuchte / лампа,
+  frame / Frame / кадр, brightness level / Helligkeitsstufe / ступень яркости, pairing / Kopplung /
+  сопряжение, sniffer / Sniffer / сниффер. German uses "Sie" and German decimal commas (2,4 GHz).
+- Log lines, code, YAML keys, register names and entity IDs are **never** translated.
+
+## Protocol source
+The radio protocol is fully decoded in the repository
+**<https://github.com/SergeyZh/emotion-control-re>**. The key document is
+<https://github.com/SergeyZh/emotion-control-re/blob/main/captures/PROTOCOL-FINDINGS.md> (CC2500
+register map, packet format, commands). Do not reinvent the protocol — take it from there.
+
+## Hardware
 - **ESP32 DevKit V1** (ESP-WROOM-32), `board: esp32dev`.
-- **Модуль CC2500**, кварц **26 МГц** (проверено) → карта регистров из reverse-репо применяется
-  как есть, без пересчёта RF. Распиновка модуля — `datasheets/CC2500_module_pinout.md`.
-- **Питание модуля — 3.3 В (пин `3V3`), НЕ 5 В/VIN.**
+- **CC2500 module**, **26 MHz** crystal (verified) → the register map from the reverse-engineering repo
+  applies as-is, with no RF recalculation. Module pinout — `datasheets/CC2500_module_pinout.md`.
+- **Power the module from 3.3 V (pin `3V3`), NOT 5 V/VIN.**
+- The module has **no pin header**: nine pads on a 1.27 mm pitch, so wires are soldered directly. The
+  verified module: <https://de.aliexpress.com/item/1005005501196142.html>.
 
-### Подключение (модуль → ESP32)
-| Модуль | Сигнал | ESP32 |
+### Wiring (module → ESP32)
+| Module | Signal | ESP32 |
 |---|---|---|
 | SI (2) | MOSI | GPIO23 |
 | SCLK (3) | SCLK | GPIO18 |
 | SO (4) | MISO | GPIO19 |
 | CSn (8) | CS | GPIO5 |
-| GDO0 (7) | TX-done | GPIO4 |
+| GDO0 (7) | TX done | GPIO4 |
 | VDD (1) / VSS (6) | 3V3 / GND | 3V3 / GND |
 
-## Компонент
+## Component
 `components/cc2500_emotion/` — external component (`AUTO_LOAD = ["light"]`):
-- `__init__.py` — схема хаба (SPI-устройство, `cs_pin`, опц. `gdo0_pin`, `remote_id`).
-- `cc2500_emotion.h/.cpp` — драйвер CC2500 (сброс, загрузка регистров + PATABLE + калибровка,
-  сборка пакета, передача ×5). Публичные методы `send_on/off/brightness_up/down/color_temp/pair/raw`.
-- `light.py` + `emotion_light.h` — платформа `light` (`EmotionControlLight : light::LightOutput`,
-  тип COLOR_TEMPERATURE). ESPHome авто-включает все `.h` компонента, поэтому light-класс вынесен
-  в отдельный заголовок, а `AUTO_LOAD` гарантирует наличие заголовков light.
-- Кнопки (сопряжение/яркость/raw) не отдельная платформа, а `template button` в YAML → вызывают
-  публичные методы хаба.
+- `__init__.py` — hub schema (SPI device, `cs_pin`, optional `gdo0_pin`, `remote_id`).
+- `cc2500_emotion.h/.cpp` — the CC2500 driver (reset, register + PATABLE load + calibration, packet
+  assembly, ×5 transmission). Public methods `send_on/off/brightness_up/down/color_temp/pair/raw`.
+- `light.py` + `emotion_light.h` — the `light` platform (`EmotionControlLight : light::LightOutput`,
+  type COLOR_TEMPERATURE). ESPHome auto-includes every `.h` of a component, which is why the light
+  class lives in its own header, and `AUTO_LOAD` guarantees the light headers are present.
+- Buttons (pairing/brightness/raw) are not a separate platform but `template button`s in YAML → they
+  call the hub's public methods.
 
-### Ключевые факты протокола (чтобы не наступать на грабли)
-- Пакет в TX FIFO: `0E | ID₀ ID₁ ID₂ ID₃ | cmd | val | 00×6 | chk | 16` (`0E`=длина 14).
-- **Контрольная сумма — общая формула:** `chk = 0x7E ⊕ ID₀ ⊕ ID₁ ⊕ ID₂ ⊕ ID₃ ⊕ 0x16 ⊕ cmd ⊕ val`.
-  Свёрнутый вариант `0xBE ⊕ cmd ⊕ val` из reverse-репо верен ТОЛЬКО для ID `68 04 F7 4D` —
-  не хардкодить, ID настраиваемый.
-- Команды: `0x01` вкл (несёт цвет. температуру в `val`), `0x02` выкл, `0x11` ярче (шаг),
-  `0x21` темнее (шаг), `0x50` цвет. температура (`val`: `0x00` тёплый … `0xFF` холодный),
-  `0x60` сопряжение.
-- Яркость = **5 ступеней**. Команды (уточнено приёмом, `val=0x00`, chk валиден):
-  - `0x11` ярче на шаг, `0x21` темнее на шаг (ступенчато).
-  - `0x10` (удержание «ярче») = **начать плавный ramp ВВЕРХ**, `0x20` (удержание «темнее») =
-    **ramp ВНИЗ**; полный ход мин↔макс ≈ **1 c**. `0x40` (отпускание) = **остановить** ramp.
-  - ⚠️ `0x10`/`0x20` — НЕ мгновенный макс/мин; уровень зависит от момента `0x40`. Мы их **не шлём**
-    (края набираем шагами с запасом — лампа упирается в край). Одиночные, могут теряться.
-- **Яркость.** Стандартный `COLOR_TEMPERATURE` light со слайдером. HA всегда цепляет слайдер
-  яркости к любой сущности с цвет. температурой — «color temp без яркости» на одном light невозможно.
-  Модель (Фаза 6b): **абсолютная, `brightness_levels`=5**. `EmotionControlLight` отслеживает ступень
-  (`current_level_`), при изменении шагает разницу (`0x11`/`0x21`) без мигания; на краях шлёт +1 шаг
-  запаса (лампа клампится). `0x10`/`0x20` НЕ используем в передаче. Приём ramp от пульта оценивается
-  по времени (`start_ramp_`/`finish_ramp_`/`update_ramp`, `ramp_duration`≈1c; если `0x40` потерян —
-  финализация по таймауту). Baseline — первый увиденный уровень. `send_raw` — для экспериментов.
-  - **Пауза между шагами:** лампа схлопывает шаги, летящие подряд (~14 мс), в один. Поэтому шаги
-    яркости идут через **неблокирующую очередь** в хабе (`queue_brightness_steps` → `pending_...`),
-    отправка по одному раз в `step_interval` (по умолчанию **200 мс**) из `loop()`. Блокирующий
-    `delay` нельзя — повесит ESPHome.
-  - **Кнопки «Ярче»/«Темнее» (`step_brightness`) шлют шаг ВСЕГДА**, даже на краю (ресинхрон UI↔лампа).
-- **Сохранение состояния при ребуте:** дефолт `restore_mode` переопределён на `RESTORE_DEFAULT_OFF`
-  (базовый light по умолчанию `ALWAYS_OFF` — терял состояние). На буте ПЕРВЫЙ `write_state`
-  (восстановление из флеш) только адаптируется в трекеры и показывается в HA, но **НЕ передаётся в
-  эфир** (флаг `initialized_`): лампа помнит своё состояние сама, а слепая ретрансляция могла бы
-  перезаписать изменение, сделанное пультом за время простоя ESP.
-- **RX→состояние (Фаза 6b):** хаб держит указатель на light (`set_light`), при принятой команде
-  зовёт `EmotionControlLight::on_remote_command(cmd,val)`, которая обновляет HA через `make_call` с
-  флагом `suppress_tx_` (в `write_state` он гасит передачу, только адаптирует трекеры). Так приём не
-  вызывает обратную передачу. Forward-declare `EmotionControlLight` в хабе, полный тип — в `.cpp`.
-  - ⚠️ **`make_call().perform()` вызывает `write_state` ОТЛОЖЕННО** (из `LightState::loop()` через
-    `next_write_`, не синхронно). Поэтому `suppress_tx_` **персистентный**: ставим `true` перед
-    `perform()` и сбрасываем ВНУТРИ `write_state`. Если сбросить сразу после `perform()` — флаг уже
-    `false` к моменту записи → команда уйдёт в эфир повторно (лампа получит две команды).
-- **Яркость: 5 ступеней → 1%/25%/50%/75%/100%** (нижняя привязана к 1% — полу HA, т.к. 0% = off).
-  Гамма выключена (`gamma_correct: 1.0`), иначе round-trip уровень↔яркость ломается.
-- **Дедуп приёма — единое скользящее окно ~150 мс по (ID,cmd,val)** для ВСЕХ команд. ID в ключе
-  нужен, чтобы два пульта, нажатых одновременно, не схлопывались в одно событие (важно для сниффера);
-  эхо-подавление своей TX штампует `rx_last_id_` нашим `remote_id`. Пульт шлёт каждое
-  нажатие короткой серией (~32 мс), а команды яркости иногда дублируются — окно схлопывает серию/дубль
-  в одно событие, но отдельные нажатия (>150 мс) считаются раздельно. Цвет.темп при вращении меняет
-  `val` → не схлопывается. Удержание яркости шлёт `0x10`/`0x20`, а не поток `0x11`, так что быстрых
-  легитимных повторов нет. (Раньше ошибочно убирал дедуп для яркости — это давало двойные шаги.)
-- **RX-синхронизация (Фаза 6, запланирована):** слушать эфир, ловить команды физического пульта
-  (по `remote_id`) и обновлять состояние в HA через `publish_state` без обратной передачи. Это
-  делает состояние достоверным и убирает дрейф dead-reckoning яркости. Ключевой риск — работает ли
-  аппаратный FEC-приём CC2500 при переменной длине (лампа принимает → железо умеет; проверить у нас).
-  Полудуплекс: после нашей TX возвращаться в RX (MCSM1 TXOFF_MODE=RX), не ловить эхо своей команды.
-- Повторы передачи (`send_command_(cmd,val,repeats)`): on/off/цвет.темп/сопряжение — **×5** (как
-  пульт); **команды яркости `0x11`/`0x21` — ×1** (пульт шлёт их одиночными; ×5 давало бы лишнюю
-  нагрузку/риск лишних шагов). Чип аппаратно делает MSK/FEC/CRC/whitening-off/преамбулу/sync — софт
-  готовит только payload.
-- ESPHome SPI: `enable()`/`disable()` открывают/закрывают транзакцию и управляют CS.
-  **Нельзя** звать `disable()` без парного `enable()` — будет паника `spi_bus_lock` и бутлуп.
+### Key protocol facts (to avoid stepping on rakes)
+- Packet in the TX FIFO: `0E | ID₀ ID₁ ID₂ ID₃ | cmd | val | 00×6 | chk | 16` (`0E` = length 14).
+- **Checksum — the general formula:** `chk = 0x7E ⊕ ID₀ ⊕ ID₁ ⊕ ID₂ ⊕ ID₃ ⊕ 0x16 ⊕ cmd ⊕ val`. The
+  collapsed variant `0xBE ⊕ cmd ⊕ val` from the reverse-engineering repo holds ONLY for ID
+  `68 04 F7 4D` — do not hardcode it, the ID is configurable.
+- Commands: `0x01` on (carries the color temperature in `val`), `0x02` off, `0x11` brighter (step),
+  `0x21` dimmer (step), `0x50` color temperature (`val`: `0x00` warm … `0xFF` cold), `0x60` pairing.
+- Brightness = **5 levels**. Commands (refined through reception, `val=0x00`, `chk` valid):
+  - `0x11` one step brighter, `0x21` one step dimmer (stepped).
+  - `0x10` ("brighter" held) = **start a smooth ramp UP**, `0x20` ("dimmer" held) = **ramp DOWN**; a
+    full min↔max sweep ≈ **1 s**. `0x40` (released) = **stop** the ramp.
+  - ⚠️ `0x10`/`0x20` are NOT an instant max/min; the level depends on when `0x40` arrives. We **do not
+    send** them (the end stops are reached with steps plus headroom — the lamp clamps). They are
+    singles and can be lost.
+- **Brightness.** A standard `COLOR_TEMPERATURE` light with a slider. Home Assistant always attaches a
+  brightness slider to any entity that has color temperature — "color temp without brightness" is
+  impossible on a single light. The model (phase 6b): **absolute, `brightness_levels`=5**.
+  `EmotionControlLight` tracks the level (`current_level_`) and steps the difference (`0x11`/`0x21`) on
+  change, without flicker; at the end stops it sends +1 step of headroom (the lamp clamps).
+  `0x10`/`0x20` are NOT used for transmission. A ramp received from the remote is estimated from
+  elapsed time (`start_ramp_`/`finish_ramp_`/`update_ramp`, `ramp_duration` ≈ 1 s; if the `0x40` is
+  lost, it is finalized by timeout). The baseline is the first level ever seen. `send_raw` is for
+  experiments.
+  - **Pause between steps:** the lamp collapses steps that fly back to back (~14 ms) into one. So
+    brightness steps go through a **non-blocking queue** in the hub (`queue_brightness_steps` →
+    `pending_...`), sent one at a time once per `step_interval` (default **200 ms**) from `loop()`. A
+    blocking `delay` is not allowed — it would hang ESPHome.
+  - **The "Brighter"/"Dimmer" buttons (`step_brightness`) ALWAYS send a step**, even at an end stop
+    (resyncs UI ↔ lamp).
+- **State restoration across reboots:** the `restore_mode` default is overridden to
+  `RESTORE_DEFAULT_OFF` (the base light defaults to `ALWAYS_OFF`, which lost the state). On boot the
+  FIRST `write_state` (restore from flash) only adapts the trackers and shows up in Home Assistant, but
+  is **NOT transmitted over the air** (the `initialized_` flag): the lamp remembers its own state,
+  while blindly retransmitting could overwrite a change made by remote while the ESP was down.
+- **RX → state (phase 6b):** the hub holds a pointer to the light (`set_light`) and, on a received
+  command, calls `EmotionControlLight::on_remote_command(cmd,val)`, which updates Home Assistant via
+  `make_call` with the `suppress_tx_` flag (inside `write_state` it kills transmission and only adapts
+  the trackers). That way reception does not cause a transmission back. `EmotionControlLight` is
+  forward-declared in the hub; the full type is in the `.cpp`.
+  - ⚠️ **`make_call().perform()` invokes `write_state` LAZILY** (from `LightState::loop()` via
+    `next_write_`, not synchronously). Hence `suppress_tx_` is **persistent**: set it to `true` before
+    `perform()` and clear it INSIDE `write_state`. Clearing it right after `perform()` would leave the
+    flag already `false` by write time → the command would go out over the air again (the lamp would
+    get two commands).
+- **Brightness: 5 levels → 1%/25%/50%/75%/100%** (the bottom one pinned to 1 %, Home Assistant's floor,
+  since 0 % = off). Gamma is disabled (`gamma_correct: 1.0`), otherwise the level ↔ brightness
+  round-trip breaks.
+- **Reception dedup — a single ~150 ms sliding window keyed on (ID,cmd,val)** for ALL commands. The ID
+  belongs in the key so that two remotes pressed simultaneously do not collapse into one event
+  (important for the sniffer); echo suppression of our own TX stamps `rx_last_id_` with our
+  `remote_id`. The remote sends every press as a short burst (~32 ms), and brightness commands are
+  sometimes duplicated — the window collapses a burst/duplicate into one event, while separate presses
+  (>150 ms) count separately. Rotating color temperature changes `val` → it does not collapse. Holding
+  a brightness button sends `0x10`/`0x20` rather than a stream of `0x11`, so there are no fast
+  legitimate repeats. (Removing dedup for brightness was a mistake made earlier — it produced double
+  steps.)
+- Transmission repeats (`send_command_(cmd,val,repeats)`): on/off/color temp/pairing — **×5** (like the
+  remote); **brightness commands `0x11`/`0x21` — ×1** (the remote sends them as singles; ×5 would add
+  load and risk extra steps). The chip does MSK/FEC/CRC/whitening-off/preamble/sync in hardware — the
+  software only prepares the payload.
+- ESPHome SPI: `enable()`/`disable()` open/close a transaction and drive CS. You **must not** call
+  `disable()` without a matching `enable()` — that causes an `spi_bus_lock` panic and a boot loop.
 
-### ID пульта и сниффер (Фаза 8)
-- **Дефолта у `remote_id` нет и быть не должно.** ID принадлежит конкретному пульту; зашитый
-  дефолт заставлял бы чужие устройства выходить в эфир под ID автора. Опция необязательная: без
-  неё `has_remote_id_ == false`, `send_command_` отказывает с `ESP_LOGE`, хаб только слушает.
-- Тестовый ID `68 04 9F 25` (сопряжён с тестовой лампой) переехал в `secrets.yaml`
-  (`emotion_remote_id`), откуда его берёт `bench.yaml`. В репозиторий он не попадает.
-- **`components/cc2500_emotion_sniffer/`** — отдельный компонент (`DEPENDENCIES = ["cc2500_emotion"]`),
-  привязан к хабу через `cv.use_id` + `set_parent`. Радио не дублирует: подписывается на хаб через
-  `register_frame_listener()`. Логирует ID/cmd/val/RSSI/LQI каждого валидного кадра; неизвестные
-  команды печатает вместе с полными 14 байтами (в «резервных» нулях может быть данные).
-- ⚠️ Интерфейс `EmotionFrameListener` объявлен **в заголовке хаба**, а не в сниффере: ESPHome
-  копирует в сборку только используемые компоненты, поэтому хаб не может включать заголовок
-  сниффера — иначе конфиг без сниффера не соберётся. Это та же причина, по которой
-  `EmotionControlLight` только forward-declared.
-- `register_frame_listener()` принудительно ставит `receive_ = true` — слушатель без приёма
-  бессмысленен, а порядок `to_code` (хаб раньше сниффера) гарантирует, что это не затрётся.
-- **`PKTLEN` = `0x0E`, а НЕ `0xFF` из снятой карты — сознательное отклонение.** У пульта это значение
-  безразлично (он только передаёт), а нам вредит: на 2436.2 МГц (внутри Wi-Fi) чип периодически
-  ложно ловит sync `0xD391` на шуме, берёт следующий шумовой байт за длину (в логах видно
-  `length byte 0x3C/0x88/0x21`) и ждёт до 255 байт, которых нет, — то есть глохнет до переполнения
-  FIFO. Кадр Emotion всегда 14 байт, поэтому чип теперь сам отбрасывает мусорные длины.
-  **Не «чинить» обратно на `0xFF` при сверке с reverse-репо.**
-- **Удержание кнопки = поток кадров каждые ~12 мс** (замерено: `0x20` шёл 8 раз за 90 мс), а не
-  редкие одиночные посылки. Отсюда два следствия: дедуп с окном 150 мс схлопывает удержание в одно
-  событие (это и нужно — старт ramp), и при логировании КАЖДОЙ копии удержание даёт ~85 строк/с,
-  что на 115200 бод почти забивает порт и может само тормозить `loop()`.
-- ⚠️ **AFC пробовали — не надо.** Гипотеза «неустойчивый приём = расхождение кварцев» ОПРОВЕРГНУТА
-  замером. `FREQEST` (status-регистр `0x32`, 1 LSB = XOSC/2¹⁴ = 1.587 кГц) на реальных кадрах скачет
-  случайно и упирается в ±68 кГц — это ровно предел FOC (`FOCCFG=0x1D` → ±BW/8, BW=542 кГц из
-  `MDMCFG4=0x2D`), причём в обе стороны. Расстройка кварца была бы ПОСТОЯННОЙ и односторонней.
-  Значит оценка шумовая, и запись её в `FSCTRL0` внесла бы случайную расстройку. `FREQEST` оставлен
-  только как диагностика в логе; читать его ТОЛЬКО пока чип ещё в RX, до `enter_rx_()`.
-- **`poll_rx_` вычитывает ВСЕ полные кадры из FIFO, а не один.** Пульт повторяет нажатие ~5 раз —
-  это и есть помехоустойчивость протокола. Старый вариант «прочитать один кадр и сбросить FIFO»
-  выбрасывал 4 копии из 5, поэтому одна битая копия теряла всё нажатие. `enter_rx_()` в конце
-  остаётся: недочитанный хвост частичного кадра иначе рассинхронизирует следующие.
-- **Список пультов в HA — `text_sensor.py` платформа сниффера** (`discovered_remotes`). Сущности
-  ESPHome статические, создаются при компиляции, поэтому «entity на каждый найденный пульт»
-  невозможен в принципе — только одна строка-список (лимит 8 пультов, лог всё равно видит все).
-  `esp32_ble_tracker` устроен так же. Публикуется ЛУЧШИЙ RSSI, а не последний: значение сходится и
-  публикация прекращается, иначе при удержании кнопки (~85 кадров/с) сущность дёргалась бы постоянно.
-  Заголовки `text_sensor` тянутся через `AUTO_LOAD` — иначе конфиг без text_sensor не соберётся.
-- **`on_frame` (триггер сниффера) шлёт СОБЫТИЯ, поэтому дедуплицирован.** Лог видит каждую копию,
-  триггер — одно срабатывание на нажатие: удержание даёт ~85 кадров/с, и столько же событий в шину
-  HA положили бы API. Флаг `repeat` считает хаб и передаёт слушателю — дедуп НЕ дублируется в
-  сниффере. Аргументы: `remote_id` (hex-строка), `command`, `command_name`, `value`, `rssi`, `lqi`.
-- **Слушатель вызывается ДО дедупа** (получая флаг `repeat`) (дедуп — политика пути управления, не диагностики). Число
-  копий на одно нажатие в логе сниффера — главный индикатор качества связи: 4–5 строк это здоровый
-  канал, 1 строка — половина копий теряется.
-- В `process_packet_` порядок теперь: длина → CRC → тип-байт+`chk` (считается **из принятых** байт
-  ID, поэтому валидирует кадр любого пульта) → дедуп → слушатель → фильтр по `remote_id` → действие.
-  Фильтр по ID стоит ПОСЛЕ слушателя — иначе сниффер не увидит чужие пульты, то есть не сможет
-  показать искомый ID.
+### Remote ID and the sniffer (phase 8)
+- **`remote_id` has no default and must not have one.** The ID belongs to one specific remote; a
+  shipped default would make other people's devices transmit under the author's ID. The option is
+  optional: without it `has_remote_id_ == false`, `send_command_` refuses with `ESP_LOGE`, and the hub
+  only listens.
+- The test ID `68 04 9F 25` (paired with the test lamp) moved into `secrets.yaml`
+  (`emotion_remote_id`), where `bench.yaml` picks it up. It never reaches the repository.
+- **`components/cc2500_emotion_sniffer/`** — a separate component (`DEPENDENCIES = ["cc2500_emotion"]`)
+  bound to the hub via `cv.use_id` + `set_parent`. It does not duplicate the radio: it subscribes to
+  the hub through `register_frame_listener()`. It logs ID/cmd/val/RSSI/LQI of every valid frame;
+  unknown commands are printed together with all 14 bytes (the "reserved" zeros may carry data).
+- ⚠️ The `EmotionFrameListener` interface is declared **in the hub's header**, not in the sniffer:
+  ESPHome copies only the components actually used into the build, so the hub cannot include the
+  sniffer's header — otherwise a config without the sniffer would not compile. Same reason
+  `EmotionControlLight` is only forward-declared.
+- `register_frame_listener()` forcibly sets `receive_ = true` — a listener without reception is
+  pointless, and the `to_code` order (hub before sniffer) guarantees this is not overwritten.
+- **`PKTLEN` = `0x0E`, NOT the `0xFF` from the captured map — a deliberate deviation.** For the remote
+  that value is irrelevant (it only transmits), but it hurts us: at 2436.2 MHz (inside Wi-Fi) the chip
+  periodically false-syncs on `0xD391` in noise, takes the next noise byte as the length (the logs show
+  `length byte 0x3C/0x88/0x21`) and waits for up to 255 bytes that never come — i.e. it goes deaf until
+  the FIFO overflows. An Emotion frame is always 14 bytes, so now the chip discards garbage lengths
+  itself. **Do not "fix" this back to `0xFF`** when cross-checking against the reverse-engineering repo.
+- **A held button = a stream of frames every ~12 ms** (measured: `0x20` came 8 times in 90 ms), not
+  sparse single transmissions. Two consequences: dedup with a 150 ms window collapses a hold into one
+  event (which is what we want — the ramp start), and logging EVERY copy means a hold produces ~85
+  lines/s, which at 115200 baud nearly saturates the port and can itself slow down `loop()`.
+- ⚠️ **AFC was tried — do not.** The hypothesis "flaky reception = crystal mismatch" was DISPROVED by
+  measurement. `FREQEST` (status register `0x32`, 1 LSB = XOSC/2¹⁴ = 1.587 kHz) jumps randomly on real
+  frames and saturates at ±68 kHz — exactly the FOC limit (`FOCCFG=0x1D` → ±BW/8, BW = 542 kHz from
+  `MDMCFG4=0x2D`), and in both directions. A crystal offset would be CONSTANT and one-sided. So the
+  estimate is noise, and writing it into `FSCTRL0` would introduce a random detuning. `FREQEST` is kept
+  only as log diagnostics; read it ONLY while the chip is still in RX, before `enter_rx_()`.
+- **`poll_rx_` drains ALL complete frames from the FIFO, not one.** The remote repeats a press ~5
+  times — that is precisely the protocol's robustness. The old "read one frame and flush the FIFO"
+  approach threw away 4 copies out of 5, so a single damaged copy lost the whole press. The
+  `enter_rx_()` at the end stays: an unread tail of a partial frame would otherwise desynchronize the
+  following ones.
+- **The list of remotes in Home Assistant is the sniffer's `text_sensor.py` platform**
+  (`discovered_remotes`). ESPHome entities are static, created at compile time, so "an entity per
+  discovered remote" is fundamentally impossible — only a single list string (limit 8 remotes; the log
+  still sees all of them). `esp32_ble_tracker` works the same way. The **best** RSSI is published, not
+  the latest: the value converges and publishing stops, otherwise a held button (~85 frames/s) would
+  make the entity twitch constantly. The `text_sensor` headers are pulled in via `AUTO_LOAD` —
+  otherwise a config without text_sensor would not compile.
+- **`on_frame` (the sniffer's trigger) emits EVENTS, hence it is deduplicated.** The log sees every
+  copy, the trigger fires once per press: a hold produces ~85 frames/s, and as many events onto the HA
+  bus would take down its API. The `repeat` flag is computed by the hub and passed to the listener —
+  dedup is NOT duplicated inside the sniffer. Arguments: `remote_id` (hex string), `command`,
+  `command_name`, `value`, `rssi`, `lqi`.
+- **The listener is called BEFORE dedup** (receiving the `repeat` flag), because dedup is a policy of
+  the control path, not of diagnostics. The number of copies per press in the sniffer log is the main
+  link-quality indicator: 4–5 lines is a healthy channel, 1 line means half the copies are lost.
+- The order in `process_packet_` is now: length → CRC → type byte + `chk` (computed **from the
+  received** ID bytes, so it validates a frame from any remote) → dedup → listener → filter by
+  `remote_id` → action. The ID filter sits AFTER the listener — otherwise the sniffer would not see
+  other remotes, i.e. could not show the ID being looked for.
 
-## Рабочий процесс (dev)
-- ESPHome в `./.venv/` (venv проекта). Версия 2026.7.
-- Стендовый конфиг: **`bench.yaml`** — без Wi-Fi, логи по USB, кнопка **BOOT (GPIO0)**
-  переключает лампу вкл/выкл (живой тест передачи). Нужен `secrets.yaml` с `emotion_remote_id`.
-- Боевой конфиг: **`example.yaml`** — с Wi-Fi/API/OTA (нужен `secrets.yaml`).
-- Конфиг сниффера: **`sniffer.yaml`** — только приём, без `remote_id` и без `light`; для поиска ID
-  пульта и неизвестных команд.
-- Прошивка + логи: `./.venv/bin/esphome run bench.yaml --device /dev/cu.usbserial-0001`
-  (порт может отличаться — проверять `ls /dev/cu.usbserial*`; при зависшем `Connecting...`
-  зажать BOOT на плате).
-- Только компиляция (проверка кода): `./.venv/bin/esphome compile bench.yaml`.
-- Тулчейн ESP32 в кэше `~/Library/Caches/esphome` → сборки быстрые.
+## Workflow (dev)
+- ESPHome in `./.venv/` (project venv). Version 2026.7.
+- Bench config: **`bench.yaml`** — no Wi-Fi, logs over USB, the **BOOT (GPIO0)** button toggles the lamp
+  on/off (a live transmission test). Needs `secrets.yaml` with `emotion_remote_id`.
+- Production config: **`example.yaml`** — with Wi-Fi/API/OTA (needs `secrets.yaml`).
+- Sniffer config: **`sniffer.yaml`** — receive only, no `remote_id` and no `light`; for finding a
+  remote's ID and unknown commands.
+- Flash + logs: `./.venv/bin/esphome run bench.yaml --device /dev/cu.usbserial-0001` (the port may
+  differ — check `ls /dev/cu.usbserial*`; if `Connecting...` hangs, hold BOOT on the board).
+- Compile only (code check): `./.venv/bin/esphome compile bench.yaml`.
+- The ESP32 toolchain is cached in `~/Library/Caches/esphome` → rebuilds are fast.
 
-### Признак успешной инициализации в логах
+### Signs of successful initialization in the logs
 ```
 CC2500 PARTNUM=0x80 VERSION=0x03
 Radio check: SYNC1=0xD3 MDMCFG2=0x73 CHANNR=0x10
