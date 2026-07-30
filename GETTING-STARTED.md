@@ -1,64 +1,69 @@
-# Пошаговое руководство: светильник L&S в Home Assistant
+[![en](https://img.shields.io/badge/lang-en-blue.svg)](GETTING-STARTED.md)
+[![ru](https://img.shields.io/badge/lang-ru-green.svg)](GETTING-STARTED.ru.md)
+[![de](https://img.shields.io/badge/lang-de-yellow.svg)](GETTING-STARTED.de.md)
 
-Провожу от «купил ESP32» до «светильник управляется из Home Assistant». Опыта с ESPHome не нужно,
-а вот паяльник понадобится: провода к модулю CC2500 припаиваются (подробности в шаге 0). Времени —
-примерно час, из которого большая часть уходит на первую сборку прошивки.
+# Getting started: an L&S light in Home Assistant
 
-Идея простая: **ESP32 прикидывается вашим пультом**. Он передаёт в эфир те же команды с тем же
-идентификатором, поэтому лампа слушается его сразу, без сопряжения и без вмешательства в лампу.
-Поэтому первый содержательный шаг — узнать ID своего пульта.
+This guide goes from "I bought an ESP32" to "the light is controlled from Home Assistant". No
+ESPHome experience required, but you will need a soldering iron: the wires to the CC2500 module have
+to be soldered (details in step 0). Budget about an hour, most of which is the first firmware build.
 
-## Шаг 0. Собрать железо
+The idea is simple: **the ESP32 impersonates your remote.** It transmits the same commands with the
+same identifier, so the lamp obeys it immediately — no pairing, no modification of the lamp. That is
+why the first real step is finding out your remote's ID.
 
-Понадобится:
+## Step 0. Build the hardware
 
-| Что | Требования | Примечание |
+You will need:
+
+| What | Requirements | Notes |
 |---|---|---|
-| **ESP32** | Любая плата с USB | Проверено на DevKit V1 (ESP-WROOM-32) |
-| **Модуль CC2500** | 2.4 ГГц, кварц **26.000 МГц** | Проверен [этот с AliExpress](https://de.aliexpress.com/item/1005005501196142.html). Продаются как «CC2500 module 2.4G» |
-| **Паяльник** | Обычный, с не слишком толстым жалом | Провода к модулю припаиваются, разъёма нет |
-| Провода | 6 шт., один конец «мама» под гребёнку ESP32 | Второй конец — на пайку к модулю |
+| **ESP32** | Any board with USB | Verified on a DevKit V1 (ESP-WROOM-32) |
+| **CC2500 module** | 2.4 GHz, **26.000 MHz** crystal | [This one from AliExpress](https://de.aliexpress.com/item/1005005501196142.html) is verified. Sold as "CC2500 module 2.4G" |
+| **Soldering iron** | Ordinary, with a reasonably fine tip | Wires are soldered to the module; there is no connector |
+| Wires | 6, one end female for the ESP32 header | The other end gets soldered to the module |
 
-⚠️ **Модуль придётся паять.** Все модули CC2500, которые удалось найти в продаже (включая
-проверенный по ссылке), идут без гребёнки: 9 плоских площадок с шагом **1.27 мм** по нижнему краю
-платы 12 × 19 мм. Гребёнка 2.54 мм в такой шаг не встаёт, переходников под него в комплекте не
-бывает — поэтому провода припаиваются прямо к площадкам. Точек всего шесть (`SI`, `SCLK`, `SO`,
-`CSn`, `VDD`, `VSS`), но они мелкие: удобнее взять тонкий монтажный провод (МГТФ или жилку из
-шлейфа), а плату на время пайки закрепить. Чертёж с нумерацией площадок —
+⚠️ **The module has to be soldered.** Every CC2500 module found on the market (including the one
+linked above) comes without a pin header: nine flat pads along the bottom edge of a 12 × 19 mm board
+on a **1.27 mm** pitch. A 2.54 mm header does not fit that pitch, and no adapter is included — so
+wires go directly onto the pads. There are only six joints (`SI`, `SCLK`, `SO`, `CSn`, `VDD`,
+`VSS`), but they are small: use thin hookup wire (PTFE-insulated wire, or a strand pulled from a
+ribbon cable) and clamp the board while soldering. The drawing with pad numbering is
 [`datasheets/CC2500_module_photo.jpeg`](datasheets/CC2500_module_photo.jpeg).
 
-После пайки прозвоните соседние площадки на замыкание: шаг мелкий, перемычка припоем между
-`SI`/`SCLK` или `CSn`/`XO` — самая вероятная ошибка сборки.
+When you are done, check neighbouring pads for shorts: at this pitch a solder bridge between
+`SI`/`SCLK` or `CSn`/`XO` is the single most likely assembly mistake.
 
-⚠️ **Не путайте CC2500 с CC1101** — внешне они почти одинаковы, но CC1101 работает на
-433/868 МГц и на этой лампе не заработает никогда. Проверьте маркировку на самой микросхеме.
+⚠️ **Do not confuse CC2500 with CC1101** — they look nearly identical, but CC1101 works on
+433/868 MHz and will never talk to this lamp. Check the marking on the chip itself.
 
-⚠️ **Кварц должен быть 26 МГц.** Радиочастотные регистры сняты с пульта и применяются как есть;
-с кварцем 27 МГц частота и скорость уедут, и лампа вас не услышит. На модуле кварц подписан.
+⚠️ **The crystal must be 26 MHz.** The RF registers were captured off the remote and are applied
+as-is; with a 27 MHz crystal the frequency and data rate drift off and the lamp will not hear you.
+The crystal is labelled on the module.
 
-Соедините по таблице (это пример распиновки, любые пины можно поменять в YAML):
+Wire it up as follows (this is an example pinout — any pin can be changed in YAML):
 
-| Модуль CC2500 | Сигнал | ESP32 |
+| CC2500 module | Signal | ESP32 |
 |---|---|---|
 | SI (2) | MOSI | GPIO23 |
 | SCLK (3) | SCLK | GPIO18 |
 | SO (4) | MISO | GPIO19 |
 | CSn (8) | CS | GPIO5 |
-| GDO0 (7) | конец передачи | GPIO4 |
-| VDD (1) | питание | **3V3** |
-| VSS (6) | земля | GND |
+| GDO0 (7) | end of transmission | GPIO4 |
+| VDD (1) | power | **3V3** |
+| VSS (6) | ground | GND |
 
-- **Питание только с пина `3V3`.** 5 В (`VIN`) убьёт модуль.
-- `GDO2` оставьте не подключённым — он не используется.
-- `GDO0` не обязателен: без него конец передачи определяется опросом чипа по SPI. Подключите, если
-  пин свободен — это чуть точнее.
-- Нумерация площадок модуля — в [`datasheets/CC2500_module_pinout.md`](datasheets/CC2500_module_pinout.md),
-  рядом лежат чертёж платы с номерами и схема включения.
+- **Power from the `3V3` pin only.** 5 V (`VIN`) will kill the module.
+- Leave `GDO2` unconnected — it is not used.
+- `GDO0` is optional: without it, end of transmission is detected by polling the chip over SPI.
+  Connect it if you have a pin to spare — it is slightly more precise.
+- Pad numbering is in [`datasheets/CC2500_module_pinout.md`](datasheets/CC2500_module_pinout.md);
+  the board drawing with numbers and the application schematic sit next to it.
 
-## Шаг 1. Установить ESPHome
+## Step 1. Install ESPHome
 
-ESPHome — это то, что превращает YAML-конфиг в прошивку. Ставим в отдельный venv, чтобы не
-засорять систему:
+ESPHome is what turns a YAML config into firmware. Install it into its own venv to keep your system
+clean:
 
 ```bash
 git clone https://github.com/SergeyZh/emotion-control-ha
@@ -67,29 +72,29 @@ python3 -m venv .venv
 ./.venv/bin/pip install esphome
 ```
 
-Дальше все команды идут через `./.venv/bin/esphome`. Найдите USB-порт платы:
+From here on, every command goes through `./.venv/bin/esphome`. Find your board's USB port:
 
 ```bash
 ls /dev/cu.usbserial*      # macOS
 ls /dev/ttyUSB*            # Linux
 ```
 
-Подставляйте найденный порт вместо `/dev/cu.usbserial-0001` в примерах ниже.
+Substitute the port you found for `/dev/cu.usbserial-0001` in the examples below.
 
-## Шаг 2. Узнать ID своего пульта
+## Step 2. Find your remote's ID
 
-`remote_id` — четыре байта, которыми пульт подписывает каждую посылку; лампа запомнила их при
-сопряжении на заводе или у установщика. У каждого пульта они свои, поэтому **значения по умолчанию
-не существует** — его надо подслушать. Тем же модулем CC2500, ничего дополнительно не нужно.
+`remote_id` is the four bytes your remote stamps on every transmission; the lamp memorized them when
+it was paired at the factory or by the installer. Every remote has its own, so **there is no default
+value** — it has to be sniffed off the air. The same CC2500 module does that, nothing else needed.
 
-Прошейте конфиг сниффера — в нём `remote_id` намеренно не задан, поэтому устройство только слушает
-и в эфир не выходит:
+Flash the sniffer config. `remote_id` is deliberately unset in it, so the device only listens and
+never transmits:
 
 ```bash
 ./.venv/bin/esphome run sniffer.yaml --device /dev/cu.usbserial-0001
 ```
 
-Дождитесь в логе баннера инициализации:
+Wait for the init banner in the log:
 
 ```
 CC2500 PARTNUM=0x80 VERSION=0x03
@@ -97,60 +102,66 @@ Radio check: SYNC1=0xD3 MDMCFG2=0x73 CHANNR=0x10
 Radio configured and calibrated.
 ```
 
-Если этих строк нет — переходите к [«Если что-то не работает»](#если-что-то-не-работает): дальше
-идти бессмысленно, радио не отвечает.
+If those lines never appear, jump to [Troubleshooting](#troubleshooting): there is no point going
+further while the radio is not responding.
 
-Теперь **нажимайте кнопки на пульте**, держа его рядом с платой. На каждое нажатие в лог падает
-несколько строк:
+Now **press buttons on the remote** while holding it next to the board. Each press drops several
+lines into the log:
 
 ```
 [I][cc2500_emotion_sniffer]: remote 68049F25  cmd=0x01 (on)  val=0x80  RSSI=-38 dBm  LQI=2  offset=+3 kHz
 ```
 
-`68049F25` — это и есть искомый ID. **Выпишите его.**
+`68049F25` is the ID you are after. **Write it down.**
 
-Сниффер видит все пульты Emotion в радиусе приёма, а не только ваш (у соседей тоже могут быть
-такие светильники). Свой определяется по `RSSI`: он у вас в руках, поэтому уровень сигнала заметно
-выше — типично −30…−50 dBm против −70 и ниже у чужих. Для надёжности нажмите кнопку несколько раз
-и убедитесь, что появляется один и тот же ID.
+The sniffer sees every Emotion remote in range, not just yours (your neighbours may have these
+lights too). Yours is identified by `RSSI`: it is in your hand, so its signal is noticeably
+stronger — typically −30…−50 dBm versus −70 or worse for someone else's. To be sure, press a button
+a few times and confirm the same ID keeps appearing.
 
-Подробнее про сниффер, `LQI`, чужие пульты и список найденных ID прямо в Home Assistant —
-[SNIFFER.md](SNIFFER.md).
+More on the sniffer, `LQI`, other people's remotes and the list of discovered IDs inside Home
+Assistant — [SNIFFER.md](SNIFFER.md).
 
-## Шаг 3. Прописать Wi-Fi и ID
+## Step 3. Enter Wi-Fi and the ID
 
-Боевой конфиг [`example.yaml`](example.yaml) берёт пароли из `secrets.yaml` — файла, который не
-попадает в git. Создайте его рядом:
+The production config [`example.yaml`](example.yaml) takes credentials from `secrets.yaml`, a file
+that never lands in git. Create it alongside:
 
 ```yaml
 # secrets.yaml
-wifi_ssid: "ВашаСеть"
-wifi_password: "пароль"
-emotion_remote_id: "68049F25"                 # ID из шага 2
-emotion_control__encryption_key: "..."        # ключ шифрования API, см. ниже
+wifi_ssid: "YourNetwork"
+wifi_password: "password"
+emotion_remote_id: "68049F25"                 # the ID from step 2
 ```
 
-Ключ шифрования для API Home Assistant — это 32 случайных байта в base64. Сгенерировать:
+The Home Assistant connection is unencrypted by default. To encrypt it, generate a key:
 
 ```bash
 ./.venv/bin/python -c "import os,base64; print(base64.b64encode(os.urandom(32)).decode())"
 ```
 
-(Можно и без шифрования — тогда уберите блок `api: encryption:` из `example.yaml`.)
+put it into `secrets.yaml` as `emotion_control__encryption_key`, and extend the `api:` block in
+`example.yaml`:
 
-## Шаг 4. Прошить боевой конфиг
+```yaml
+api:
+  encryption:
+    key: !secret emotion_control__encryption_key
+```
+
+## Step 4. Flash the production config
 
 ```bash
 ./.venv/bin/esphome run example.yaml --device /dev/cu.usbserial-0001
 ```
 
-Первый раз — обязательно по USB. Дальше плата обновляется по воздуху (OTA), и `--device` больше
-не нужен.
+The first time has to be over USB. After that the board updates over the air (OTA) and `--device`
+is no longer needed.
 
-Если прошивка застряла на `Connecting...` — зажмите на плате кнопку **BOOT** и не отпускайте,
-пока не начнётся загрузка.
+If flashing hangs at `Connecting...`, hold the **BOOT** button on the board and keep it pressed
+until the upload starts.
 
-В логе должно появиться:
+The log should show:
 
 ```
 CC2500 PARTNUM=0x80 VERSION=0x03
@@ -158,92 +169,99 @@ Radio configured and calibrated.
 Listening for remote commands (RX enabled, MARCSTATE=0x0D).
 ```
 
-## Шаг 5. Добавить в Home Assistant
+## Step 5. Add it to Home Assistant
 
-Устройство находится само: **Настройки → Устройства и службы**, ESPHome предложит обнаруженный
-`emotion-control` — нажмите «Настроить». Если попросит ключ шифрования, вставьте
-`emotion_control__encryption_key` из `secrets.yaml`. (Не нашлось само — «Добавить интеграцию» →
-ESPHome → хост `emotion-control.local`.)
+The device announces itself: go to **Settings → Devices & services** and ESPHome will offer the
+discovered `emotion-control` — click "Configure". If you enabled encryption, paste
+`emotion_control__encryption_key` from `secrets.yaml` when asked. (Not discovered? "Add integration"
+→ ESPHome → host `emotion-control.local`.)
 
-Появятся сущности:
+You will get these entities:
 
-- **Light «L&S Emotion»** — вкл/выкл, яркость, цветовая температура.
-- **Кнопки** «Сопряжение», «Ярче», «Темнее», «Raw send».
-- **Поля** «Raw cmd (hex)» / «Raw value (hex)» — для экспериментов с протоколом.
-- **«Найденные пульты»** — диагностический список услышанных в эфире пультов.
+- **Light "L&S Emotion"** — on/off, brightness, color temperature.
+- **Buttons** "Pair", "Brighter", "Dimmer", "Raw send".
+- **Text fields** "Raw cmd (hex)" / "Raw value (hex)" — for protocol experiments.
+- **"Discovered remotes"** — a diagnostic list of remotes heard on the air.
 
-## Шаг 6. Проверить
+## Step 6. Verify
 
-По порядку, чтобы понимать, где сломалось, если сломается:
+In this order, so you know where things broke if they do:
 
-1. **Включите лампу из HA.** Загорелась → передача работает, ID верный. Не загорелась → лампа не
-   слышит: проверьте ID и расстояние (для первого теста встаньте в 2–3 метрах от светильника).
-2. **Подвигайте цветовую температуру.** Меняется плавно — это абсолютная команда, самая надёжная.
-3. **Подвигайте яркость.** Слайдер прыгает по пяти ступеням: 1 / 25 / 50 / 75 / 100 % — так и
-   задумано, у лампы ровно пять уровней.
-4. **Нажмите кнопку на физическом пульте.** Состояние в HA должно измениться само — значит приём
-   работает и HA с лампой не разъедутся.
+1. **Turn the lamp on from Home Assistant.** It lights up → transmission works and the ID is
+   correct. It doesn't → the lamp is not hearing you: check the ID and the distance (for the first
+   test, stand 2–3 metres from the light).
+2. **Move the color temperature slider.** It changes smoothly — this is an absolute command, the most
+   reliable one.
+3. **Move the brightness slider.** It snaps across five levels: 1 / 25 / 50 / 75 / 100 %. That is by
+   design; the lamp has exactly five.
+4. **Press a button on the physical remote.** The state in Home Assistant should change on its own —
+   that means reception works and HA will not drift away from the lamp.
 
-Работает — готово. Дальше по желанию: [CONFIGURATION.md](CONFIGURATION.md) (все опции, сущности,
-команды протокола) и [SNIFFER.md](SNIFFER.md) (автоматизации HA на кнопки пультов).
+Working? You are done. Optional next stops: [CONFIGURATION.md](CONFIGURATION.md) (all options,
+entities, protocol commands) and [SNIFFER.md](SNIFFER.md) (Home Assistant automations on remote
+buttons).
 
-## Если что-то не работает
+## Troubleshooting
 
-### `PARTNUM`/`VERSION` не появились или читаются как `0x00`/`0xFF`
-Радио не отвечает по SPI. Проверьте по порядку:
-- **Питание с `3V3`**, не с `VIN`. И что земля общая.
-- **MOSI/MISO не перепутаны** — это классика. `SI` модуля идёт на MOSI (GPIO23), `SO` на MISO (GPIO19).
-- **`CSn` подключён** к тому пину, который указан в `cs_pin`.
-- **Пайка:** прозвоните каждую площадку до пина ESP32 (нет ли непропая) и соседние площадки между
-  собой (нет ли перемычки припоем). При шаге 1.27 мм это две самые частые ошибки.
-- **Провод не отломился у площадки** — тонкая жилка на такой плате ломается от изгиба, и обрыв
-  бывает не виден. Дёрните каждый провод легонько.
+### `PARTNUM`/`VERSION` never appear, or read as `0x00`/`0xFF`
+The radio is not answering over SPI. Check, in order:
+- **Power from `3V3`**, not `VIN`. And that ground is common.
+- **MOSI/MISO not swapped** — the classic. The module's `SI` goes to MOSI (GPIO23), `SO` to MISO
+  (GPIO19).
+- **`CSn` connected** to the pin named in `cs_pin`.
+- **The soldering:** buzz out every pad to its ESP32 pin (cold joint?) and neighbouring pads against
+  each other (solder bridge?). At a 1.27 mm pitch these are the two most common faults.
+- **No wire snapped off at the pad** — thin wire breaks when flexed on a board like this, and the
+  break can be invisible. Tug each wire gently.
 
-### Радио инициализировалось, но лампа не реагирует
-- **Проверьте ID** — самая частая причина. Перепрошейте `sniffer.yaml`, нажмите кнопку и сверьте
-  побайтово.
-- **`remote_id` вообще задан?** Без него компонент отказывается передавать и пишет в лог ошибку —
-  такой конфиг только слушает.
-- **Расстояние.** У модулей без нормальной антенны дальность бывает метры. Подойдите ближе.
-- **Проверьте, что дело не в лампе:** нажмите настоящий пульт, лампа реагирует?
+### The radio initializes but the lamp does not react
+- **Check the ID** — by far the most common cause. Reflash `sniffer.yaml`, press a button and
+  compare byte by byte.
+- **Is `remote_id` set at all?** Without it the component refuses to transmit and logs an error —
+  such a config only listens.
+- **Distance.** Modules without a decent antenna can be limited to a few metres. Move closer.
+- **Rule out the lamp:** press the real remote — does the lamp respond?
 
-### Пульт не виден в сниффере
-- Держите пульт вплотную к плате и нажимайте кнопки **несколько раз** — одиночная посылка может
-  потеряться.
-- **Замените батарейку в пульте.** Севшая даёт ровно поведение «иногда доезжает»: лампа ещё
-  слушается, а до вашего приёмника уже не добивает.
-- Разбор диагностики приёма (`LQI`, `CRC failed`, `RX FIFO overflow`) — в
-  [SNIFFER.md](SNIFFER.md#если-приём-неустойчив).
+### The remote does not show up in the sniffer
+- Hold the remote right against the board and press buttons **several times** — a single
+  transmission can be lost.
+- **Replace the battery in the remote.** A dying one produces exactly the "sometimes gets through"
+  behaviour: the lamp still obeys it, while your receiver no longer hears it.
+- Reception diagnostics (`LQI`, `CRC failed`, `RX FIFO overflow`) are covered in
+  [SNIFFER.md](SNIFFER.md#when-reception-is-flaky).
 
-### Плата не прошивается
-- Зажмите **BOOT** на время подключения.
-- Проверьте порт: `ls /dev/cu.usbserial*`. Некоторые платы требуют драйвер CH340/CP2102.
-- Занят другой программой (открытый монитор порта, Arduino IDE) — закройте её.
+### The board will not flash
+- Hold **BOOT** while it connects.
+- Check the port: `ls /dev/cu.usbserial*`. Some boards need a CH340/CP2102 driver.
+- Another program is holding the port (an open serial monitor, Arduino IDE) — close it.
 
-### Состояние в HA расходится с лампой
-Так бывает: обратной связи от лампы нет, HA показывает оценку. Выравнивается само при следующем
-действии — или сразу, если нажать кнопку на физическом пульте (приём подтянет состояние).
-Подробнее — [CONFIGURATION.md](CONFIGURATION.md#особенности-и-ограничения).
+### The state in Home Assistant disagrees with the lamp
+That happens: there is no feedback from the lamp, so Home Assistant shows an estimate. It realigns
+by itself on the next action — or immediately if you press a button on the physical remote (reception
+pulls the state in). Details in
+[CONFIGURATION.md](CONFIGURATION.md#features-and-limitations).
 
-## Альтернатива: сопряжение вместо клонирования ID
+## Alternative: pairing instead of cloning an ID
 
-Клонирование ID пульта — рекомендуемый путь: лампа слушается сразу, и нажатия пульта видны в HA.
-Но можно и наоборот — завести устройству **свой** ID и сопрячь его с лампой:
+Cloning the remote's ID is the recommended path: the lamp obeys immediately and remote presses are
+visible in Home Assistant. But you can do the opposite — give the device its **own** ID and pair it
+with the lamp:
 
-1. Придумайте любой ID (4 байта hex) и впишите в `remote_id`.
-2. Переведите лампу в режим обучения (по инструкции L&S — обычно удержание кнопки на приёмнике).
-3. Нажмите кнопку **«Сопряжение»** в Home Assistant — устройство объявит свой ID, лампа его
-   запомнит.
+1. Pick any ID (4 bytes hex) and put it in `remote_id`.
+2. Put the lamp into learning mode (per the L&S manual — usually holding a button on the receiver).
+3. Press the **"Pair"** button in Home Assistant — the device announces its ID and the lamp
+   memorizes it.
 
-⚠️ При своём ID **синхронизация с физическим пультом работать не будет**: устройство слушает
-только тот ID, который задан в `remote_id`, а пульт шлёт свой. Если важно видеть в HA нажатия
-пульта — клонируйте его ID.
+⚠️ With your own ID, **synchronization with the physical remote will not work**: the device only
+listens for the ID set in `remote_id`, while the remote sends its own. If seeing remote presses in
+Home Assistant matters to you, clone its ID.
 
-## Стендовый режим (без Wi-Fi)
+## Bench mode (no Wi-Fi)
 
-Для проверки радио и передачи без Home Assistant есть [`bench.yaml`](bench.yaml): логи по USB,
-Wi-Fi не нужен, кнопка **BOOT** на плате переключает лампу вкл/выкл. ID берётся из `secrets.yaml`
-(`emotion_remote_id`). Удобно, чтобы отделить проблемы радио от проблем сети:
+To test the radio and transmission without Home Assistant there is [`bench.yaml`](bench.yaml): logs
+over USB, no Wi-Fi needed, and the **BOOT** button on the board toggles the lamp on and off. The ID
+comes from `secrets.yaml` (`emotion_remote_id`). Handy for separating radio problems from network
+problems:
 
 ```bash
 ./.venv/bin/esphome run bench.yaml --device /dev/cu.usbserial-0001

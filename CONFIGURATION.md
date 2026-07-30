@@ -1,11 +1,15 @@
-# Справочник конфигурации
+[![en](https://img.shields.io/badge/lang-en-blue.svg)](CONFIGURATION.md)
+[![ru](https://img.shields.io/badge/lang-ru-green.svg)](CONFIGURATION.ru.md)
+[![de](https://img.shields.io/badge/lang-de-yellow.svg)](CONFIGURATION.de.md)
 
-Все опции YAML, сущности в Home Assistant, команды протокола и особенности реализации.
-Если вы здесь впервые — начните с [GETTING-STARTED.md](GETTING-STARTED.md).
+# Configuration reference
 
-## Подключение компонента
+Every YAML option, the Home Assistant entities, the protocol commands and the implementation
+quirks. If this is your first time here, start with [GETTING-STARTED.md](GETTING-STARTED.md).
 
-Компонент подключается как external component — прямо с GitHub:
+## Adding the component
+
+The component is pulled in as an external component, straight from GitHub:
 
 ```yaml
 external_components:
@@ -13,7 +17,7 @@ external_components:
     components: [cc2500_emotion, cc2500_emotion_sniffer]
 ```
 
-Или из локальной копии репозитория (для разработки):
+Or from a local checkout (for development):
 
 ```yaml
 external_components:
@@ -22,9 +26,9 @@ external_components:
       path: components
 ```
 
-`cc2500_emotion_sniffer` указывайте только если он вам нужен — см. [SNIFFER.md](SNIFFER.md).
+List `cc2500_emotion_sniffer` only if you need it — see [SNIFFER.md](SNIFFER.md).
 
-## Полный пример
+## Full example
 
 ```yaml
 spi:
@@ -35,10 +39,10 @@ spi:
 cc2500_emotion:
   id: emotion
   cs_pin: GPIO5
-  gdo0_pin: GPIO4         # опционально
-  remote_id: "68049F25"   # ID вашего пульта (4 байта hex)
-  receive: true           # слушать эфир и синхронизировать состояние
-  step_interval: 200ms    # пауза между посылками шагов яркости
+  gdo0_pin: GPIO4         # optional
+  remote_id: "68049F25"   # your remote's ID (4 bytes hex)
+  receive: true           # listen to the air and sync state
+  step_interval: 200ms    # pause between brightness step transmissions
 
 light:
   - platform: cc2500_emotion
@@ -50,105 +54,105 @@ light:
     warm_white_color_temperature: 2700 K
 ```
 
-Готовые конфиги в репозитории: [`example.yaml`](example.yaml) (боевой — Wi-Fi, API, OTA, светильник,
-кнопки, сниффер), [`bench.yaml`](bench.yaml) (стенд по USB), [`sniffer.yaml`](sniffer.yaml)
-(только приём).
+Ready-made configs in the repository: [`example.yaml`](example.yaml) (production — Wi-Fi, API, OTA,
+light, buttons, sniffer), [`bench.yaml`](bench.yaml) (bench over USB), [`sniffer.yaml`](sniffer.yaml)
+(receive only).
 
-## `cc2500_emotion` — хаб (драйвер радио)
+## `cc2500_emotion` — the hub (radio driver)
 
-Владеет модулем CC2500: конфигурирует его, передаёт и принимает кадры. `MULTI_CONF` — при желании
-можно объявить несколько хабов (два модуля на разных SPI).
+Owns the CC2500 module: configures it, transmits and receives frames. It is `MULTI_CONF`, so you can
+declare several hubs if you want (two modules on separate SPI buses).
 
-| Опция | По умолчанию | Описание |
+| Option | Default | Description |
 |---|---|---|
-| `cs_pin` | — (**обязательно**) | Пин CS (`CSn` модуля) |
-| `gdo0_pin` | — (опц.) | `GDO0` для определения конца передачи. Без него — опрос регистра `MARCSTATE` |
-| `remote_id` | — (опц.) | ID пульта: 4 байта hex, `"68049F25"` или `"68:04:9F:25"`. **Без него передача отключена**, устройство только слушает эфир |
-| `receive` | `true` | Держать чип в приёме: команды физического пульта обновляют состояние в HA |
-| `step_interval` | `200ms` | Пауза между отдельными посылками шагов яркости |
-| `id` | (авто) | Идентификатор для ссылок из `light` и лямбд |
+| `cs_pin` | — (**required**) | CS pin (the module's `CSn`) |
+| `gdo0_pin` | — (opt.) | `GDO0`, used to detect end of transmission. Without it, the `MARCSTATE` register is polled |
+| `remote_id` | — (opt.) | Remote ID: 4 bytes hex, `"68049F25"` or `"68:04:9F:25"`. **Without it transmission is disabled** and the device only listens |
+| `receive` | `true` | Keep the chip in receive mode: commands from the physical remote update the state in Home Assistant |
+| `step_interval` | `200ms` | Pause between individual brightness step transmissions |
+| `id` | (auto) | Identifier used by `light` and by lambdas |
 
-Плюс стандартные ключи схемы SPI-устройства.
+Plus the standard SPI device schema keys.
 
-**Почему у `remote_id` нет значения по умолчанию.** ID принадлежит конкретному пульту. Зашитый
-дефолт заставлял бы чужие устройства выходить в эфир под ID автора — то есть управлять чужими
-лампами. Поэтому опция необязательная и без дефолта: не задали — компонент отказывается передавать
-(с ошибкой в логе) и работает как приёмник. Как узнать свой ID — [SNIFFER.md](SNIFFER.md).
+**Why `remote_id` has no default.** The ID belongs to one specific remote. A shipped default would
+make everyone else's device transmit under the author's ID — that is, control someone else's lamps.
+So the option is optional and has no default: if it is unset the component refuses to transmit (with
+an error in the log) and works as a receiver. How to find your ID — [SNIFFER.md](SNIFFER.md).
 
-**Зачем `step_interval`.** Лампа схлопывает шаги яркости, летящие подряд (~14 мс), в один. Поэтому
-шаги идут через неблокирующую очередь: по одной посылке раз в `step_interval`. Если ваша лампа
-теряет шаги при быстром движении слайдера — увеличьте; если протяжка через все ступени кажется
-медленной — уменьшите.
+**What `step_interval` is for.** The lamp collapses brightness steps that arrive back to back
+(~14 ms) into one. So steps go through a non-blocking queue: one transmission per `step_interval`.
+If your lamp drops steps when the slider moves fast, increase it; if sweeping across all levels feels
+slow, decrease it.
 
-### Публичные методы (для лямбд)
+### Public methods (for lambdas)
 
-Доступны через `id(emotion).…` в любых `lambda`:
+Available as `id(emotion).…` inside any `lambda`:
 
-| Метод | Действие |
+| Method | Action |
 |---|---|
-| `send_on(uint8_t color_temp)` | Включить с заданной цветовой температурой (`0x80` — середина) |
-| `send_off()` | Выключить |
-| `send_color_temp(uint8_t value)` | Цветовая температура: `0x00` тёплый … `0xFF` холодный |
-| `brightness_step(int direction)` | Шаг яркости: `1` ярче, `-1` темнее. Обновляет и лампу, и состояние в HA. Шлёт **всегда**, даже на краю (ресинхронизация UI ↔ лампа) |
-| `send_brightness_up()` / `send_brightness_down()` | Шаг яркости «мимо» состояния HA — только в эфир, трекеры не двигает |
-| `send_pair()` | Сопряжение — объявить свой `remote_id` лампе в режиме обучения |
-| `send_raw(uint8_t cmd, uint8_t val)` | Произвольная команда — для экспериментов с протоколом |
+| `send_on(uint8_t color_temp)` | Turn on at the given color temperature (`0x80` is the middle) |
+| `send_off()` | Turn off |
+| `send_color_temp(uint8_t value)` | Color temperature: `0x00` warm … `0xFF` cold |
+| `brightness_step(int direction)` | Brightness step: `1` brighter, `-1` dimmer. Updates both the lamp and the state in Home Assistant. Always transmits, even at an end stop (resyncs UI ↔ lamp) |
+| `send_brightness_up()` / `send_brightness_down()` | A brightness step that bypasses Home Assistant state — transmit only, trackers untouched |
+| `send_pair()` | Pairing — announce our `remote_id` to a lamp in learning mode |
+| `send_raw(uint8_t cmd, uint8_t val)` | Arbitrary command — for protocol experiments |
 
-Для кнопок в HA нужен `brightness_step()`: он держит состояние в HA и лампу вместе. Работает он
-через платформу `light`, поэтому в конфиге без светильника (например, в [`sniffer.yaml`](sniffer.yaml))
-ничего не делает — там используйте `send_brightness_up()`/`_down()`.
+For buttons in Home Assistant use `brightness_step()`: it keeps HA state and the lamp together. It
+works through the `light` platform, so in a config without a light (for example
+[`sniffer.yaml`](sniffer.yaml)) it does nothing — use `send_brightness_up()`/`_down()` there.
 
-## `light` — платформа `cc2500_emotion`
+## `light` — the `cc2500_emotion` platform
 
-Обычный светильник ESPHome типа `COLOR_TEMPERATURE`.
+An ordinary ESPHome light of type `COLOR_TEMPERATURE`.
 
-| Опция | По умолчанию | Описание |
+| Option | Default | Description |
 |---|---|---|
-| `cc2500_emotion_id` | (авто) | Ссылка на хаб `cc2500_emotion` |
-| `brightness_levels` | `5` | Число дискретных ступеней яркости лампы (2…32) |
-| `ramp_duration` | `1000ms` | Время полного плавного хода яркости мин↔макс — для оценки удержания кнопки на пульте |
-| `cold_white_color_temperature` | `6500 K` | Холодный край диапазона |
-| `warm_white_color_temperature` | `2700 K` | Тёплый край диапазона |
-| `restore_mode` | `RESTORE_DEFAULT_OFF` | Восстановление состояния при перезагрузке |
-| `gamma_correct` | `1.0` | **Не менять** — иначе ломается соответствие ступеней и процентов |
-| `default_transition_length` | `0s` | У ступенчатого устройства плавных переходов нет |
+| `cc2500_emotion_id` | (auto) | Reference to the `cc2500_emotion` hub |
+| `brightness_levels` | `5` | Number of discrete brightness levels the lamp has (2…32) |
+| `ramp_duration` | `1000ms` | Time for a full min↔max brightness ramp — used to estimate a held button on the remote |
+| `cold_white_color_temperature` | `6500 K` | Cold end of the range |
+| `warm_white_color_temperature` | `2700 K` | Warm end of the range |
+| `restore_mode` | `RESTORE_DEFAULT_OFF` | State restoration across reboots |
+| `gamma_correct` | `1.0` | **Do not change** — anything else breaks the mapping between levels and percentages |
+| `default_transition_length` | `0s` | A stepped device has no smooth fades |
 
-Плюс стандартные ключи `light` (`name`, `icon`, `id`, …).
+Plus the standard `light` keys (`name`, `icon`, `id`, …).
 
-**Про яркость.** Home Assistant всегда цепляет слайдер яркости к любой сущности с цветовой
-температурой — «цветовая температура без яркости» на одном светильнике невозможна. Поэтому модель
-абсолютная: компонент отслеживает текущую ступень и при изменении шагает разницу, без мигания. Пять
-ступеней отображаются как **1 / 25 / 50 / 75 / 100 %** (нижняя привязана к 1 %, потому что 0 % в HA
-означает «выключено»). На краях шлётся один лишний шаг с запасом — лампа упирается в край, и это
-точка ресинхронизации.
+**About brightness.** Home Assistant always attaches a brightness slider to any entity that has
+color temperature — "color temperature without brightness" is impossible on a single light. So the
+model is absolute: the component tracks the current level and steps the difference when it changes,
+without flicker. Five levels are presented as **1 / 25 / 50 / 75 / 100 %** (the bottom one is pinned
+to 1 % because 0 % means "off" in Home Assistant). At the end stops one extra step is sent as
+headroom — the lamp clamps, and that is a resynchronization point.
 
-**Про `restore_mode`.** Дефолт переопределён с базового `ALWAYS_OFF`, иначе состояние терялось при
-каждой перезагрузке. Восстановленное состояние **не передаётся лампе**: она помнит своё сама, а
-слепая ретрансляция перезаписала бы то, что успели сделать пультом, пока ESP был выключен.
+**About `restore_mode`.** The default is overridden from the base `ALWAYS_OFF`, which lost the state
+on every reboot. The restored state is **not transmitted to the lamp**: it remembers its own, and
+blindly retransmitting would overwrite whatever was done by remote while the ESP was off.
 
-## Дополнительные кнопки
+## Extra buttons
 
-Кнопки не отдельная платформа, а обычные `template button`, вызывающие методы хаба — так их можно
-переименовать, убрать или добавить свои, не меняя код компонента. Пример из
+The buttons are not a separate platform but plain `template button`s calling hub methods — so you
+can rename them, drop them or add your own without touching the component. Example from
 [`example.yaml`](example.yaml):
 
 ```yaml
 button:
   - platform: template
-    name: "Сопряжение"
+    name: "Pair"
     on_press:
       lambda: "id(emotion).send_pair();"
 
   - platform: template
-    name: "Ярче"
+    name: "Brighter"
     on_press:
       lambda: "id(emotion).brightness_step(1);"
   - platform: template
-    name: "Темнее"
+    name: "Dimmer"
     on_press:
       lambda: "id(emotion).brightness_step(-1);"
 
-  # «Сырая» команда: cmd и value задаются прямо в HA, без перепрошивки.
+  # Raw command: cmd and value are typed in Home Assistant, no reflashing.
   - platform: template
     name: "Raw send"
     on_press:
@@ -176,90 +180,92 @@ text:
     max_length: 4
 ```
 
-Кнопки «Ярче»/«Темнее» шлют шаг **всегда**, даже когда слайдер уже на краю: если HA и лампа
-разошлись, это способ подогнать их руками.
+The "Brighter"/"Dimmer" buttons **always** transmit a step, even when the slider is already at an end
+stop: if Home Assistant and the lamp have drifted apart, this is how you nudge them back together.
 
-## Сущности в Home Assistant
+## Home Assistant entities
 
-| Сущность | Что делает |
+| Entity | What it does |
 |---|---|
-| **Light** «L&S Emotion» | Вкл/выкл, яркость (5 ступеней → 1/25/50/75/100 %), цветовая температура |
-| **Button** «Сопряжение» | Объявить `remote_id` лампе в режиме обучения |
-| **Button** «Ярче» / «Темнее» | Шаг яркости, всегда передаётся |
-| **Button** «Raw send» | Отправить команду из полей ниже |
-| **Text** «Raw cmd (hex)» / «Raw value (hex)» | Байты для «Raw send» |
-| **Text sensor** «Найденные пульты» | Диагностика: пульты, услышанные в эфире (если включён сниффер) |
+| **Light** "L&S Emotion" | On/off, brightness (5 levels → 1/25/50/75/100 %), color temperature |
+| **Button** "Pair" | Announce `remote_id` to a lamp in learning mode |
+| **Button** "Brighter" / "Dimmer" | One brightness step, always transmitted |
+| **Button** "Raw send" | Send the command from the fields below |
+| **Text** "Raw cmd (hex)" / "Raw value (hex)" | The bytes for "Raw send" |
+| **Text sensor** "Discovered remotes" | Diagnostic: remotes heard on the air (when the sniffer is enabled) |
 
-Нажатия **физического пульта** отражаются в HA автоматически: вкл/выкл и цветовая температура —
-точно, яркость — по шагам либо по оценке плавного хода.
+Presses on the **physical remote** are reflected in Home Assistant automatically: on/off and color
+temperature exactly, brightness by steps or by ramp estimate.
 
-## Особенности и ограничения
+## Features and limitations
 
-- **Обратной связи от лампы нет.** Протокол односторонний: лампа не отвечает. Состояние в HA — это
-  оценка. Достоверные точки: абсолютные команды (вкл/выкл, цветовая температура), края яркости и
-  принятые от пульта команды.
-- **Яркость — 5 дискретных ступеней.** Слайдер квантуется в 1/25/50/75/100 %. Протяжка из края в
-  край занимает до ~1 с, потому что шаги идут по одному через `step_interval`.
-- **Команды яркости пульт шлёт одиночными** (в отличие от вкл/выкл, которые повторяются пять раз),
-  поэтому отдельная посылка иногда теряется в эфире. Самокорректируется на краях и при следующем
-  действии.
-- **Плавное удержание кнопки на пульте** (`0x10`/`0x20`, останов `0x40`) оценивается по времени
-  через `ramp_duration` — то есть приблизительно. Если `0x40` потерялся, ход финализируется по
-  таймауту.
-- **После перезагрузки** состояние восстанавливается из флеша и показывается в HA, но лампе не
-  передаётся. Если её меняли пультом за время простоя, HA покажет последнее известное — выровняется
-  при первом действии.
-- **Полудуплекс.** Одно радио и на приём, и на передачу: во время своей передачи чип не слушает.
-  На практике незаметно — передача занимает единицы миллисекунд.
-- **2.4 ГГц, то есть внутри Wi-Fi.** Диапазон общий с Wi-Fi и Bluetooth; на дальность это влияет.
-  Для первых тестов сократите расстояние до лампы.
+- **There is no feedback from the lamp.** The protocol is one-way: the lamp never answers. The state
+  in Home Assistant is an estimate. Trustworthy anchors: absolute commands (on/off, color
+  temperature), the brightness end stops, and commands received from the remote.
+- **Brightness has 5 discrete levels.** The slider quantizes to 1/25/50/75/100 %. Sweeping end to end
+  takes up to ~1 s because steps go out one at a time, spaced by `step_interval`.
+- **The remote sends brightness commands as singles** (unlike on/off, which is repeated five times),
+  so an individual transmission is occasionally lost in the air. This self-corrects at the end stops
+  and on the next action.
+- **A held button on the remote** (`0x10`/`0x20`, stopped by `0x40`) is estimated from elapsed time
+  via `ramp_duration` — that is, approximately. If the `0x40` is lost, the ramp is finalized by
+  timeout.
+- **After a reboot** the state is restored from flash and shown in Home Assistant, but not
+  transmitted to the lamp. If the lamp was changed by remote while the ESP was down, Home Assistant
+  shows the last known state — it realigns on the first action.
+- **Half duplex.** One radio does both receive and transmit: while transmitting, the chip is not
+  listening. In practice this is invisible — a transmission takes a few milliseconds.
+- **2.4 GHz, i.e. inside Wi-Fi.** The band is shared with Wi-Fi and Bluetooth, which costs range.
+  For first tests, shorten the distance to the lamp.
 
-## Команды протокола
+## Protocol commands
 
-| cmd | Действие | val |
+| cmd | Action | val |
 |---|---|---|
-| `0x01` | Включить | текущая цветовая температура |
-| `0x02` | Выключить | `0x00` |
-| `0x11` / `0x21` | Яркость на шаг вверх / вниз | `0x00` |
-| `0x10` / `0x20` | Начать плавный ход вверх / вниз (~1 с полный ход) | `0x00` |
-| `0x40` | Остановить плавный ход | `0x00` |
-| `0x50` | Цветовая температура (`0x00` тёплый … `0xFF` холодный) | уровень |
-| `0x60` | Сопряжение | `0x00` |
+| `0x01` | Turn on | current color temperature |
+| `0x02` | Turn off | `0x00` |
+| `0x11` / `0x21` | Brightness one step up / down | `0x00` |
+| `0x10` / `0x20` | Start a smooth ramp up / down (~1 s end to end) | `0x00` |
+| `0x40` | Stop the ramp | `0x00` |
+| `0x50` | Color temperature (`0x00` warm … `0xFF` cold) | level |
+| `0x60` | Pairing | `0x00` |
 
-⚠️ `0x10`/`0x20` — **не** мгновенный максимум/минимум, а старт плавного хода: итоговый уровень
-зависит от того, когда придёт `0x40`. Компонент их не передаёт — края набирает шагами с запасом.
-На приёме, наоборот, распознаёт: пульт использует их при удержании кнопки.
+⚠️ `0x10`/`0x20` are **not** an instant maximum/minimum but the start of a smooth ramp: the final
+level depends on when the `0x40` arrives. The component never transmits them — it reaches the end
+stops with steps plus headroom instead. On reception it does recognize them: that is what the remote
+sends while a button is held.
 
-Удержание кнопки на пульте — не одиночная посылка, а поток: `0x10`/`0x20` повторяются примерно
-**каждые 12 мс**, пока кнопку держат, и заканчиваются одним `0x40`.
+Holding a button on the remote is not a single transmission but a stream: `0x10`/`0x20` repeat about
+**every 12 ms** for as long as the button is down, ending with a single `0x40`.
 
-Команды вне этой таблицы сниффер печатает как `UNKNOWN` вместе с полными 14 байтами кадра — если
-ваш пульт умеет что-то ещё, это видно сразу, и можно попробовать воспроизвести через «Raw send».
+Commands outside this table are logged by the sniffer as `UNKNOWN` together with all 14 frame bytes —
+so if your remote can do something more, you will see it immediately and can try reproducing it via
+"Raw send".
 
-### Формат кадра
+### Frame format
 
 ```
 0E | ID₀ ID₁ ID₂ ID₃ | cmd | val | 00 00 00 00 00 00 | chk | 16
 ```
 
-`0E` — длина (14 байт), `chk = 0x7E ⊕ ID₀ ⊕ ID₁ ⊕ ID₂ ⊕ ID₃ ⊕ 0x16 ⊕ cmd ⊕ val`.
+`0E` is the length (14 bytes), `chk = 0x7E ⊕ ID₀ ⊕ ID₁ ⊕ ID₂ ⊕ ID₃ ⊕ 0x16 ⊕ cmd ⊕ val`.
 
-Модуляцию (MSK, 250 kBaud, 2436.2 МГц), синхрослово `0xD391`, FEC и CRC чип CC2500 делает
-аппаратно по загруженной карте регистров — софт готовит только эти 14 байт.
+Modulation (MSK, 250 kBaud, 2436.2 MHz), the `0xD391` sync word, FEC and the CRC are all handled by
+the CC2500 in hardware from the loaded register map — the software only prepares these 14 bytes.
 
-Полный разбор протокола — RF-параметры, все 45 регистров, `PATABLE`, методика реверса — в
+The complete protocol analysis — RF parameters, all 45 registers, `PATABLE`, the reverse-engineering
+method — is in
 [`captures/PROTOCOL-FINDINGS.md`](https://github.com/SergeyZh/emotion-control-re/blob/main/captures/PROTOCOL-FINDINGS.md)
-репозитория [`emotion-control-re`](https://github.com/SergeyZh/emotion-control-re).
+of the [`emotion-control-re`](https://github.com/SergeyZh/emotion-control-re) repository.
 
-## Разработка
+## Development
 
-- ESPHome живёт в `./.venv/` (venv проекта). Разрабатывалось на 2026.7.
-- Только компиляция, без прошивки: `./.venv/bin/esphome compile bench.yaml`.
-- Прошивка с логами: `./.venv/bin/esphome run bench.yaml --device /dev/cu.usbserial-0001`.
-  Порт может отличаться — проверяйте `ls /dev/cu.usbserial*`. Застряло на `Connecting...` —
-  зажмите BOOT.
-- `bench.yaml` берёт ID пульта из `secrets.yaml` (`emotion_remote_id`), чтобы личный ID не попадал
-  в репозиторий.
-- Тулчейн ESP32 кэшируется в `~/Library/Caches/esphome`, поэтому повторные сборки быстрые.
-- Заметки о реализации, принятых решениях и наступленных граблях — [CLAUDE.md](CLAUDE.md);
-  план и статус фаз — [PLAN.md](PLAN.md).
+- ESPHome lives in `./.venv/` (a project venv). Developed against 2026.7.
+- Compile only, no flashing: `./.venv/bin/esphome compile bench.yaml`.
+- Flash with logs: `./.venv/bin/esphome run bench.yaml --device /dev/cu.usbserial-0001`. The port may
+  differ — check `ls /dev/cu.usbserial*`. Stuck at `Connecting...`? Hold BOOT.
+- `bench.yaml` takes the remote ID from `secrets.yaml` (`emotion_remote_id`) so a personal ID never
+  reaches the repository.
+- The ESP32 toolchain is cached in `~/Library/Caches/esphome`, which keeps rebuilds fast.
+- Implementation notes, decisions taken and pitfalls hit — [CLAUDE.md](CLAUDE.md); plan and phase
+  status — [PLAN.md](PLAN.md).

@@ -1,43 +1,49 @@
-# Сниффер: поиск пультов и события в Home Assistant
+[![en](https://img.shields.io/badge/lang-en-blue.svg)](SNIFFER.md)
+[![ru](https://img.shields.io/badge/lang-ru-green.svg)](SNIFFER.ru.md)
+[![de](https://img.shields.io/badge/lang-de-yellow.svg)](SNIFFER.de.md)
 
-Компонент `cc2500_emotion_sniffer` слушает эфир и показывает **все** кадры Emotion Control в радиусе
-приёма — от любых пультов, не только вашего. Нужен для трёх вещей:
+# Sniffer: finding remotes and getting events into Home Assistant
 
-1. **Узнать ID своего пульта** — без этого нечего писать в `remote_id`.
-2. **Диагностика связи** — видно, доходят кадры или бьются.
-3. **Автоматизации HA на кнопки пультов** — в том числе на кнопки, которые ничем у вас не управляют.
+The `cc2500_emotion_sniffer` component listens to the air and shows **every** Emotion Control frame
+in range — from any remote, not just yours. It is there for three things:
 
-Своё радио сниффер не занимает: он подписывается на хаб `cc2500_emotion` и получает от него уже
-проверенные кадры. Поэтому его можно держать в боевом конфиге рядом со светильником — на управление
-лампой он не влияет, только логирует.
+1. **Finding your remote's ID** — without it there is nothing to put in `remote_id`.
+2. **Link diagnostics** — you can see whether frames arrive or get mangled.
+3. **Home Assistant automations on remote buttons** — including buttons that control nothing of yours.
 
-## Узнать ID своего пульта
+The sniffer does not occupy a radio of its own: it subscribes to the `cc2500_emotion` hub and
+receives frames that have already been validated. So you can keep it in the production config next to
+the light — it only logs and does not affect lamp control.
 
-Готовый конфиг — [`sniffer.yaml`](sniffer.yaml). В нём `remote_id` намеренно не задан, поэтому
-устройство только слушает и в эфир не выходит (ID для передачи вы ещё не знаете):
+## Finding your remote's ID
+
+The ready-made config is [`sniffer.yaml`](sniffer.yaml). `remote_id` is deliberately unset in it, so
+the device only listens and never transmits (you do not know the ID to transmit with yet):
 
 ```bash
 ./.venv/bin/esphome run sniffer.yaml --device /dev/cu.usbserial-0001
 ```
 
-Нажимайте кнопки на пульте рядом с платой. Каждый распознанный кадр печатается строкой:
+Press buttons on the remote next to the board. Every recognized frame is logged as one line:
 
 ```
 [I][cc2500_emotion_sniffer]: remote 68049F25  cmd=0x01 (on)  val=0x80  RSSI=-38 dBm  LQI=2  offset=+3 kHz
 ```
 
-Свой пульт — тот, у которого `RSSI` заметно выше: он у вас в руках. Найденный ID впишите в
-`remote_id` боевого конфига.
+Your remote is the one with a noticeably higher `RSSI`: it is in your hand. Put the ID you found into
+`remote_id` in the production config.
 
-**Угадывать ID не нужно, и подделать его случайным шумом нельзя.** Кадр проверяется аппаратным CRC
-и контрольной суммой, которая считается **из самих принятых байт ID** — поэтому сниффер валидирует
-кадры любого пульта, а не только заранее известного. Либо всё сходится, либо кадр отбрасывается.
+**You do not have to guess the ID, and random noise cannot fake one.** Frames are checked by the
+hardware CRC and by a checksum computed **from the received ID bytes themselves** — which is why the
+sniffer validates frames from any remote, not only from a previously known one. Either everything
+adds up or the frame is dropped.
 
-Неизвестные команды печатаются вместе с полным кадром (все 14 байт) — в шести «резервных» байтах
-может оказаться что-то ненулевое. Это же режим для пополнения карты команд: если ваш пульт умеет
-то, чего нет в [таблице команд](CONFIGURATION.md#команды-протокола), лог покажет и код, и байты.
+Unknown commands are printed together with the full frame (all 14 bytes) — the six "reserved" bytes
+may turn out to be non-zero. This is also the mode for extending the command map: if your remote can
+do something missing from the [command table](CONFIGURATION.md#protocol-commands), the log will show
+both the code and the bytes.
 
-## Опции
+## Options
 
 ```yaml
 cc2500_emotion_sniffer:
@@ -46,17 +52,17 @@ cc2500_emotion_sniffer:
   dump_raw: false
 ```
 
-| Опция | По умолчанию | Описание |
+| Option | Default | Description |
 |---|---|---|
-| `cc2500_emotion_id` | (авто) | Ссылка на хаб `cc2500_emotion`. Приём (`receive`) включается принудительно — слушатель без приёма бессмыслен |
-| `dump_raw` | `false` | Печатать все 14 байт кадра для **каждой** команды. Неизвестные печатаются целиком всегда |
-| `on_frame` | — | Автоматизация на принятый кадр, **один раз на нажатие** — см. ниже |
-| `id` | (авто) | Идентификатор для ссылки из платформы `text_sensor` |
+| `cc2500_emotion_id` | (auto) | Reference to the `cc2500_emotion` hub. Reception (`receive`) is forced on — a listener without reception is pointless |
+| `dump_raw` | `false` | Print all 14 frame bytes for **every** command. Unknown ones are always printed in full |
+| `on_frame` | — | Automation on a received frame, **once per press** — see below |
+| `id` | (auto) | Identifier referenced by the `text_sensor` platform |
 
-## Список найденных пультов в Home Assistant
+## The list of discovered remotes in Home Assistant
 
-Если сниффер стоит в конфиге с Wi-Fi/API, найденные пульты видны не только в логах, но и в HA —
-диагностической сущностью:
+If the sniffer sits in a config with Wi-Fi/API, discovered remotes are visible not only in the log
+but in Home Assistant as well, through a diagnostic entity:
 
 ```yaml
 cc2500_emotion_sniffer:
@@ -67,58 +73,58 @@ text_sensor:
   - platform: cc2500_emotion_sniffer
     cc2500_emotion_sniffer_id: sniffer
     discovered_remotes:
-      name: "Найденные пульты"
+      name: "Discovered remotes"
 ```
 
-| Опция | Описание |
+| Option | Description |
 |---|---|
-| `cc2500_emotion_sniffer_id` | Ссылка на `cc2500_emotion_sniffer` |
-| `discovered_remotes` | Сущность со списком найденных пультов (стандартная схема `text_sensor`) |
+| `cc2500_emotion_sniffer_id` | Reference to `cc2500_emotion_sniffer` |
+| `discovered_remotes` | Entity holding the list of discovered remotes (standard `text_sensor` schema) |
 
-Состояние — все пульты, услышанные с момента загрузки, с **лучшим** уровнем сигнала каждого:
+The state is every remote heard since boot, each with its **best** signal level:
 
 ```
 6804F74D -49dBm, 68049F25 -71dBm
 ```
 
-Нажимаете кнопку на очередном пульте — он появляется в списке. Свой определяется по сигналу.
-Берётся именно лучший, а не последний уровень: так значение сходится и сущность перестаёт
-обновляться, вместо того чтобы дёргаться на каждом кадре — при удержании кнопки их около 85 в
-секунду.
+Press a button on another remote and it appears in the list. Yours is identified by signal strength.
+The best rather than the latest level is kept on purpose: that way the value converges and the entity
+stops updating, instead of twitching on every frame — a held button produces about 85 of them per
+second.
 
-⚠️ **Сущности в ESPHome создаются при компиляции**, поэтому отдельная сущность на каждый
-обнаруженный в эфире пульт технически невозможна — `esp32_ble_tracker` устроен так же (в UI
-попадают только заранее прописанные в YAML адреса, остальное живёт в логах). Отсюда же лимит: в
-списке держится до **8** пультов, дальше новые в него не добавляются — но в логе видны все.
+⚠️ **ESPHome entities are created at compile time**, so an entity per remote discovered on the air is
+technically impossible — `esp32_ble_tracker` works the same way (only addresses written into the YAML
+beforehand reach the UI, everything else lives in the logs). Hence the limit as well: the list holds
+up to **8** remotes, after which new ones are not added — but the log still shows all of them.
 
-## Триггер `on_frame`
+## The `on_frame` trigger
 
-Срабатывает на каждый принятый кадр любого пульта в радиусе приёма — **один раз на нажатие**
-(повторы серии не дублируются). Из него делаются автоматизации HA и живая таблица эфира.
+Fires on every frame received from any remote in range — **once per press** (repeats within a burst
+are not duplicated). This is what Home Assistant automations and the live air table are built on.
 
-### Аргументы
+### Arguments
 
-| Переменная | Тип | Значение |
+| Variable | Type | Value |
 |---|---|---|
-| `remote_id` | `std::string` | ID пульта, 8 hex-символов (`"6804F74D"`) |
-| `command` | `uint8_t` | Байт команды |
-| `command_name` | `std::string` | Расшифровка команды или `"UNKNOWN"` |
-| `value` | `uint8_t` | Байт значения |
-| `rssi` | `int` | Уровень сигнала, дБм |
-| `lqi` | `uint8_t` | Счётчик ошибок демодуляции (0 = идеально) |
+| `remote_id` | `std::string` | Remote ID, 8 hex characters (`"6804F74D"`) |
+| `command` | `uint8_t` | Command byte |
+| `command_name` | `std::string` | Decoded command name, or `"UNKNOWN"` |
+| `value` | `uint8_t` | Value byte |
+| `rssi` | `int` | Signal level, dBm |
+| `lqi` | `uint8_t` | Demodulation error count (0 = perfect) |
 
-⚠️ **`on_frame` срабатывает на все пульты Emotion в радиусе приёма**, включая соседские. Если нужны
-только свои — фильтруйте по `remote_id` в условии автоматизации.
+⚠️ **`on_frame` fires for every Emotion remote in range**, including your neighbours'. If you only
+want your own, filter by `remote_id` in the automation's condition.
 
-**Почему триггер дедуплицирован, а лог — нет.** Лог видит каждую копию кадра (это индикатор
-качества связи), а триггер шлёт события: удержание кнопки даёт ~85 кадров в секунду, и столько же
-событий в шину Home Assistant положили бы её API. Поэтому одно нажатие = одно срабатывание.
+**Why the trigger is deduplicated while the log is not.** The log sees every copy of a frame (that is
+the link-quality indicator), whereas the trigger emits events: a held button produces ~85 frames per
+second, and as many events would take down the Home Assistant API. So one press equals one firing.
 
-### Таблица эфира в Home Assistant
+### A live air table in Home Assistant
 
-Кто нажал, что нажал, когда и с каким сигналом — на дашборде.
+Who pressed what, when, and with what signal — on a dashboard.
 
-Шаг 1 — отправлять событие в шину HA (уже включено в [`example.yaml`](example.yaml)):
+Step 1 — send an event onto the HA bus (already included in [`example.yaml`](example.yaml)):
 
 ```yaml
 cc2500_emotion_sniffer:
@@ -141,8 +147,9 @@ cc2500_emotion_sniffer:
           rssi: "{{ sig }}"
 ```
 
-Шаг 2 — копить события в атрибутах сущности на стороне HA (`configuration.yaml`). У атрибутов, в
-отличие от `text_sensor`, нет лимита в 255 символов, поэтому таблица может быть полной:
+Step 2 — accumulate the events in entity attributes on the Home Assistant side
+(`configuration.yaml`). Unlike a `text_sensor`, attributes have no 255-character limit, so the table
+can be complete:
 
 ```yaml
 template:
@@ -150,7 +157,7 @@ template:
       - platform: event
         event_type: esphome.emotion_frame
     sensor:
-      - name: "Emotion эфир"
+      - name: "Emotion air"
         state: "{{ trigger.event.data.remote_id }}"
         attributes:
           remotes: >
@@ -163,29 +170,29 @@ template:
                  'last_seen': now().strftime('%H:%M:%S')}}) }}
 ```
 
-Шаг 3 — карточка на дашборде:
+Step 3 — a dashboard card:
 
 ```yaml
 type: markdown
 content: |
-  | Пульт | Команда | Знач. | RSSI | Слышали |
+  | Remote | Command | Value | RSSI | Last seen |
   |---|---|---|---|---|
-  {% for id, r in state_attr('sensor.emotion_efir', 'remotes').items() -%}
+  {% for id, r in state_attr('sensor.emotion_air', 'remotes').items() -%}
   | `{{ id }}` | {{ r.command }} | {{ r.value }} | {{ r.rssi }} dBm | {{ r.last_seen }} |
   {% endfor %}
 ```
 
-### Автоматизация на кнопку пульта
+### An automation on a remote button
 
-Тот же триггер годится для обычных автоматизаций — например, повесить сценарий HA на кнопку
-пульта, которая никакой лампой не управляет:
+The same trigger works for ordinary automations — for example, hanging a Home Assistant scene off a
+remote button that controls no lamp of yours:
 
 ```yaml
 cc2500_emotion_sniffer:
   id: sniffer
   cc2500_emotion_id: emotion
   on_frame:
-    # Кнопка «включить» на конкретном пульте → своё событие в HA
+    # The "on" button of one specific remote → a custom event in HA
     - if:
         condition:
           lambda: 'return remote_id == "6804F74D" && command == 0x01;'
@@ -194,49 +201,50 @@ cc2500_emotion_sniffer:
               event: esphome.emotion_button_on
 ```
 
-Аргументы триггера доступны во всех лямбдах внутри `on_frame`, в том числе в условиях.
+Trigger arguments are available in every lambda inside `on_frame`, conditions included.
 
-## Если приём неустойчив
+## When reception is flaky
 
-Пульт повторяет каждое нажатие серией примерно из **5 одинаковых кадров** — это и есть защита
-протокола от потерь. Сниффер печатает **каждую** копию, поэтому число строк на одно нажатие прямо
-показывает качество связи:
+The remote repeats each press as a burst of about **5 identical frames** — that is the protocol's own
+protection against losses. The sniffer prints **every** copy, so the number of lines per press is a
+direct measure of link quality:
 
-| Строк на нажатие | Что значит |
+| Lines per press | Meaning |
 |---|---|
-| 4–5 | Связь здоровая |
-| 1–2 | Половина копий теряется — работает, но на грани |
-| 0 | Кадр не детектируется вовсе |
+| 4–5 | Healthy link |
+| 1–2 | Half the copies are lost — works, but marginally |
+| 0 | The frame is not detected at all |
 
-В строке лога смотрите на `LQI` (счётчик ошибок демодуляции, **0 = идеально**) и на `offset`
-(оценка расхождения несущей).
+In the log line, watch `LQI` (demodulation error count, **0 = perfect**) and `offset` (the estimated
+carrier mismatch).
 
-| Симптом | Причина |
+| Symptom | Cause |
 |---|---|
-| Много строк `Frame rejected: CRC failed` | Сигнал ловится, но кадры бьются — слабый сигнал или помеха |
-| Отбраковок нет, но и кадров мало | Приёмник не детектирует передачу: антенна, расстояние, экранирование |
-| `offset` стабильно большой в одну сторону | Расхождение кварцев пульта и модуля |
-| `offset` скачет ±68 кГц в обе стороны | Это шум оценки на пределе компенсации, а не расстройка — компенсировать нечего |
-| `RX FIFO overflow` и `length byte 0x…` без нажатий | Ложное срабатывание на шуме Wi-Fi (мы внутри 2.4 ГГц). Данным не вредит, но крадёт приём; ограничено настройкой `PKTLEN` |
-| Один пульт читается хуже другого | Проверьте батарейку — севшая даёт ровно «иногда доезжает». Иногда помогает просто переустановка батарейки |
+| Many `Frame rejected: CRC failed` lines | The signal is being picked up but frames are damaged — weak signal or interference |
+| No rejections, but hardly any frames | The receiver is not detecting the transmission: antenna, distance, shielding |
+| `offset` consistently large in one direction | Crystal mismatch between the remote and the module |
+| `offset` jumping ±68 kHz both ways | That is estimator noise at the compensation limit, not a real offset — there is nothing to correct |
+| `RX FIFO overflow` and `length byte 0x…` with no button presses | False sync on Wi-Fi noise (we are inside 2.4 GHz). Harmless to data, but it steals reception time; bounded via `PKTLEN` |
+| One remote reads worse than another | Check its battery — a dying one produces exactly "sometimes gets through". Sometimes simply reseating the battery helps |
 
-⚠️ Не пытайтесь «чинить» скачущий `offset` записью в `FSCTRL0`: оценка при скачках шумовая, и
-компенсация внесёт случайную расстройку — приём станет хуже. Это проверялось.
+⚠️ Do not try to "fix" a jumping `offset` by writing to `FSCTRL0`: when the estimate jumps, it is
+noise, and compensating it would introduce a random detuning and make reception worse. This has been
+measured.
 
-## Как это устроено внутри
+## How it works inside
 
-Полезно, если собираетесь править код:
+Useful if you intend to modify the code:
 
-- Радио одно. Сниффер подписывается на хаб через `register_frame_listener()` и принудительно
-  включает `receive`.
-- Хаб вычитывает из FIFO **все** полные кадры за раз, а не один: серия из 5 копий — это и есть
-  помехоустойчивость протокола, выбрасывать 4 из 5 нельзя.
-- Порядок обработки кадра: длина → CRC → тип-байт и контрольная сумма (считается из принятых байт
-  ID, поэтому валидирует любой пульт) → дедупликация (окно ~150 мс по ID+cmd+val) → **слушатель
-  сниффера** → фильтр по своему `remote_id` → действие со светильником.
-- Фильтр по ID стоит **после** слушателя — иначе сниффер не увидел бы чужие пульты, то есть не смог
-  бы показать искомый ID.
-- Слушатель вызывается до дедупликации и получает флаг `repeat`: лог печатает все копии, а триггер
-  `on_frame` — только первую.
+- There is one radio. The sniffer subscribes to the hub via `register_frame_listener()` and forces
+  `receive` on.
+- The hub drains **all** complete frames from the FIFO at once, not just one: a burst of 5 copies is
+  precisely what makes the protocol robust, so throwing away 4 of 5 is not an option.
+- Frame processing order: length → CRC → type byte and checksum (computed from the received ID bytes,
+  hence valid for any remote) → deduplication (~150 ms window keyed on ID+cmd+val) → **the sniffer's
+  listener** → filter by our own `remote_id` → action on the light.
+- The ID filter sits **after** the listener — otherwise the sniffer would never see other remotes,
+  i.e. could not show you the ID you are looking for.
+- The listener is called before deduplication and receives a `repeat` flag: the log prints every copy,
+  while the `on_frame` trigger fires only for the first.
 
-Подробнее — [CLAUDE.md](CLAUDE.md).
+More detail — [CLAUDE.md](CLAUDE.md).

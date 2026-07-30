@@ -1,76 +1,83 @@
+[![en](https://img.shields.io/badge/lang-en-blue.svg)](README.md)
+[![ru](https://img.shields.io/badge/lang-ru-green.svg)](README.ru.md)
+[![de](https://img.shields.io/badge/lang-de-yellow.svg)](README.de.md)
+
 # ESPHome ↔ L&S Emotion Control (CC2500)
 
-Управляйте мебельными светильниками **L&S Emotion Control** из **Home Assistant** — без шлюза
-производителя. ESP32 с радиомодулем **CC2500** (2.4 ГГц) прикидывается вашим пультом: передаёт
-те же команды и **слушает эфир**, поэтому нажатия физического пульта тоже видны в HA.
+Control **L&S Emotion Control** furniture lights from **Home Assistant** — no vendor gateway
+needed. An ESP32 with a **CC2500** radio module (2.4 GHz) impersonates your remote: it sends the
+same commands and **listens to the air**, so presses on the physical remote show up in Home
+Assistant too.
 
-Лампа появляется в Home Assistant как обычный светильник: вкл/выкл, яркость, цветовая температура.
+The lamp appears in Home Assistant as an ordinary light: on/off, brightness, color temperature.
 
-**Статус: рабочее**, проверено на реальной лампе. Протокол расшифрован в отдельном репозитории
-[`emotion-control-re`](https://github.com/SergeyZh/emotion-control-re).
+**Status: working**, verified against a real lamp. The protocol was reverse-engineered in a separate
+repository, [`emotion-control-re`](https://github.com/SergeyZh/emotion-control-re).
 
-## Что умеет
-- **Включение/выключение** и **цветовая температура** (тёплый ↔ холодный).
-- **Яркость** — 5 ступеней лампы как обычный слайдер в HA.
-- **Синхронизация с пультом:** покрутили колесо на физическом пульте — состояние в HA обновилось.
-- **Сохранение состояния** при перезагрузке ESP.
-- **Поиск ID пульта** в эфире (компонент-сниффер) — своего и любых чужих в радиусе приёма.
-- **Сопряжение** с лампой напрямую, если не хотите клонировать существующий пульт.
+## Features
+- **On/off** and **color temperature** (warm ↔ cold).
+- **Brightness** — the lamp's 5 levels exposed as a normal Home Assistant slider.
+- **Remote synchronization:** turn the wheel on the physical remote and the state in Home Assistant
+  follows.
+- **State restored** across ESP reboots.
+- **Remote ID discovery** over the air (sniffer component) — yours and any others in range.
+- **Pairing** directly with the lamp, if you would rather not clone an existing remote.
 
-## Что понадобится
-| Компонент | Требования |
+## What you need
+| Part | Requirements |
 |---|---|
-| **ESP32** | Любая плата. Проверено на DevKit V1 (ESP-WROOM-32) |
-| **Модуль CC2500** | Именно 2.4 ГГц (**не** CC1101 — он суб-гигагерцовый), кварц **26.000 МГц**. Проверен [этот модуль с AliExpress](https://de.aliexpress.com/item/1005005501196142.html) |
-| **Паяльник** | Провода к модулю придётся **припаивать** — см. ниже |
-| **Пульт L&S** | Ваш существующий пульт — из него берётся ID. Либо лампа в режиме сопряжения |
+| **ESP32** | Any board. Verified on a DevKit V1 (ESP-WROOM-32) |
+| **CC2500 module** | 2.4 GHz only (**not** CC1101, which is sub-GHz), **26.000 MHz** crystal. [This AliExpress module](https://de.aliexpress.com/item/1005005501196142.html) is the one verified here |
+| **Soldering iron** | Wires have to be **soldered** to the module — see below |
+| **L&S remote** | Your existing remote; its ID is what the ESP32 borrows. Or a lamp in pairing mode |
 
-⚠️ **Без пайки не обойтись.** Все модули CC2500, которые удалось найти в продаже (включая
-проверенный выше), выпускаются без гребёнки: у них 9 плоских площадок с шагом **1.27 мм** на плате
-12 × 19 мм. Обычная гребёнка 2.54 мм туда не встаёт физически, поэтому 6 проводов нужно припаять к
-площадкам — паять мелко, но всего шесть точек.
+⚠️ **Soldering is unavoidable.** Every CC2500 module found on the market (including the verified one
+above) ships without a pin header: nine flat pads on a **1.27 mm** pitch along a 12 × 19 mm board.
+A standard 2.54 mm header physically does not fit, so six wires have to go straight onto the pads —
+fine work, but only six joints.
 
-Питание модуля — **3.3 В**, не 5 В. Распиновка, чертёж платы и схема —
+Power the module from **3.3 V**, not 5 V. Pinout, board drawing and schematic are in
 [`datasheets/`](datasheets/CC2500_module_pinout.md).
 
-### Подключение (модуль CC2500 → ESP32, SPI)
-| Модуль | Сигнал | ESP32 (пример, VSPI) |
+### Wiring (CC2500 module → ESP32, SPI)
+| Module | Signal | ESP32 (example, VSPI) |
 |---|---|---|
 | SI (2) | MOSI | GPIO23 |
 | SCLK (3) | SCLK | GPIO18 |
 | SO (4) | MISO | GPIO19 |
 | CSn (8) | CS | GPIO5 |
-| GDO0 (7) | конец передачи (опц.) | GPIO4 |
+| GDO0 (7) | end of transmission (opt.) | GPIO4 |
 | VDD (1) / VSS (6) | 3V3 / GND | 3V3 / GND |
 
-`GDO2` не используется. `GDO0` необязателен — без него конец передачи определяется опросом чипа.
+`GDO2` is unused. `GDO0` is optional — without it, end of transmission is detected by polling the
+chip.
 
-## Быстрый старт
+## Quick start
 ```bash
-# 1. ESPHome (пример — venv в каталоге проекта)
+# 1. ESPHome (example: a venv inside the project directory)
 python3 -m venv .venv && ./.venv/bin/pip install esphome
 
-# 2. Узнать ID своего пульта: прошить сниффер и понажимать кнопки на пульте
+# 2. Find your remote's ID: flash the sniffer and press buttons on the remote
 ./.venv/bin/esphome run sniffer.yaml --device /dev/cu.usbserial-0001
 #    → [I][cc2500_emotion_sniffer]: remote 68049F25  cmd=0x01 (on)  val=0x80  RSSI=-38 dBm  LQI=2 …
 
-# 3. Wi-Fi в secrets.yaml, найденный ID — в remote_id внутри example.yaml
-printf 'wifi_ssid: "ВашаСеть"\nwifi_password: "пароль"\n' > secrets.yaml
+# 3. Wi-Fi into secrets.yaml, the discovered ID into remote_id in example.yaml
+printf 'wifi_ssid: "YourNetwork"\nwifi_password: "password"\n' > secrets.yaml
 
-# 4. Прошить боевой конфиг (первый раз по USB, дальше можно по OTA)
+# 4. Flash the production config (over USB the first time, OTA afterwards)
 ./.venv/bin/esphome run example.yaml --device /dev/cu.usbserial-0001
 ```
 
-Признак того, что радио живо:
+Sign that the radio is alive:
 ```
 CC2500 PARTNUM=0x80 VERSION=0x03
 Radio configured and calibrated.
 Listening for remote commands (RX enabled, MARCSTATE=0x0D).
 ```
 
-Пошагово и с объяснениями — **[GETTING-STARTED.md](GETTING-STARTED.md)**.
+Step by step, with explanations — **[GETTING-STARTED.md](GETTING-STARTED.md)**.
 
-## Минимальный конфиг
+## Minimal configuration
 ```yaml
 external_components:
   - source: github://SergeyZh/emotion-control-ha
@@ -85,58 +92,64 @@ cc2500_emotion:
   id: emotion
   cs_pin: GPIO5
   gdo0_pin: GPIO4
-  remote_id: "68049F25"   # ID вашего пульта
+  remote_id: "68049F25"   # your remote's ID
 
 light:
   - platform: cc2500_emotion
     name: "L&S Emotion"
     cc2500_emotion_id: emotion
 ```
-Все опции — в [CONFIGURATION.md](CONFIGURATION.md). Готовые конфиги: [`example.yaml`](example.yaml)
-(боевой, с Wi-Fi), [`bench.yaml`](bench.yaml) (стенд по USB), [`sniffer.yaml`](sniffer.yaml)
-(только приём).
+Every option is documented in [CONFIGURATION.md](CONFIGURATION.md). Ready-made configs:
+[`example.yaml`](example.yaml) (production, with Wi-Fi), [`bench.yaml`](bench.yaml) (bench over
+USB), [`sniffer.yaml`](sniffer.yaml) (receive only).
 
-## Как это работает
-CC2500 настраивается снятой с пульта картой регистров (MSK, 250 kBaud, 2436.2 МГц, sync `0xD391`,
-FEC, аппаратный CRC) — модуляцию, кодирование и контрольную сумму кадра чип делает сам, софт
-готовит только 14-байтовый payload с ID, командой и значением.
+## How it works
+The CC2500 is set up from the register map captured off the remote (MSK, 250 kBaud, 2436.2 MHz, sync
+word `0xD391`, FEC, hardware CRC) — modulation, coding and the frame CRC are done by the chip
+itself, so the software only assembles the 14-byte payload with ID, command and value.
 
-Чип держится в приёме и возвращается в него после каждой передачи. Принятые кадры проверяются
-(CRC, длина, контрольная сумма) — те, что пришли с вашего `remote_id`, обновляют состояние в HA
-**без обратной передачи**; остальные достаются сниффер-компоненту, так и находится ID пульта.
+The chip stays in receive mode and returns to it after every transmission. Incoming frames are
+validated (CRC, length, checksum): those carrying your `remote_id` update the state in Home
+Assistant **without transmitting anything back**, while the rest are handed to the sniffer
+component — which is how a remote's ID is discovered in the first place.
 
-## Ограничения
-- **Обратной связи от лампы нет.** Состояние в HA — это оценка. Точные точки: вкл/выкл, цветовая
-  температура, края яркости; приём команд пульта корректирует оценку.
-- **Яркость дискретна** — 5 ступеней (1 / 25 / 50 / 75 / 100 %), слайдер квантуется.
-- **Плавное удержание кнопки пульта** оценивается по времени, поэтому приблизительно.
-- **После перезагрузки ESP** состояние восстанавливается, но лампе не передаётся (она помнит своё
-  сама) — если её меняли пультом за это время, HA выровняется при первом действии.
+## Limitations
+- **There is no feedback from the lamp.** The state in Home Assistant is an estimate. Reliable
+  anchors: on/off, color temperature, and the brightness end stops; received remote commands correct
+  the estimate.
+- **Brightness is discrete** — 5 levels (1 / 25 / 50 / 75 / 100 %), so the slider quantizes.
+- **A held remote button** is estimated from elapsed time, hence approximate.
+- **After an ESP reboot** the state is restored but not transmitted to the lamp (it remembers its
+  own) — if the lamp was changed by remote in the meantime, Home Assistant catches up on the first
+  action.
 
-Полный список особенностей — в [CONFIGURATION.md](CONFIGURATION.md#особенности-и-ограничения).
+The full list — [CONFIGURATION.md](CONFIGURATION.md#features-and-limitations).
 
-## Документация
-| Документ | О чём |
+## Documentation
+| Document | Contents |
 |---|---|
-| **[GETTING-STARTED.md](GETTING-STARTED.md)** | Пошагово от коробки до светильника в HA |
-| **[CONFIGURATION.md](CONFIGURATION.md)** | Все опции YAML, сущности HA, команды протокола, ограничения |
-| **[SNIFFER.md](SNIFFER.md)** | Поиск пультов, триггер `on_frame`, таблица эфира в HA, диагностика приёма |
-| [PLAN.md](PLAN.md) | План проекта и статус фаз разработки |
-| [CLAUDE.md](CLAUDE.md) | Заметки для ИИ-агентов: грабли, принятые решения, рабочий процесс |
-| [emotion-control-re](https://github.com/SergeyZh/emotion-control-re) | Реверс-инжиниринг протокола: RF-параметры, регистры, формат кадра |
+| **[GETTING-STARTED.md](GETTING-STARTED.md)** | Step by step, from parts to a light in Home Assistant |
+| **[CONFIGURATION.md](CONFIGURATION.md)** | Every YAML option, HA entities, protocol commands, limitations |
+| **[SNIFFER.md](SNIFFER.md)** | Finding remotes, the `on_frame` trigger, a live air table in HA, reception diagnostics |
+| [PLAN.md](PLAN.md) | Project plan and development phase status |
+| [CLAUDE.md](CLAUDE.md) | Notes for AI agents: pitfalls, decisions, workflow (English only) |
+| [emotion-control-re](https://github.com/SergeyZh/emotion-control-re) | Protocol reverse engineering: RF parameters, registers, frame format |
 
-## Структура проекта
-| Путь | Содержимое |
+Documentation is maintained in **English (primary), Russian and German** — see the language badges
+at the top of each file.
+
+## Project layout
+| Path | Contents |
 |---|---|
-| `components/cc2500_emotion/` | Драйвер CC2500 + платформа `light` |
-| `components/cc2500_emotion_sniffer/` | Лог всех кадров Emotion в эфире, поиск ID пультов |
-| `example.yaml` | Боевой конфиг: Wi-Fi/API/OTA, light, кнопки, сниффер |
-| `bench.yaml` | Стендовый конфиг: USB-логи без Wi-Fi, кнопка BOOT переключает лампу |
-| `sniffer.yaml` | Только приём — для поиска ID пульта |
-| `datasheets/` | Распиновка, чертёж и схема модуля CC2500 + ссылка на проверенный модуль |
+| `components/cc2500_emotion/` | CC2500 driver + the `light` platform |
+| `components/cc2500_emotion_sniffer/` | Logs every Emotion frame on the air, finds remote IDs |
+| `example.yaml` | Production config: Wi-Fi/API/OTA, light, buttons, sniffer |
+| `bench.yaml` | Bench config: USB logs, no Wi-Fi, the BOOT button toggles the lamp |
+| `sniffer.yaml` | Receive only — for discovering a remote's ID |
+| `datasheets/` | Pinout, board drawing and schematic of the CC2500 module + link to the verified module |
 
-## Лицензия
+## License
 [Apache License 2.0](LICENSE).
 
-Проект не связан с L&S и не поддерживается ими. «Emotion Control» — торговая марка её владельца;
-здесь она используется только для указания совместимости.
+This project is not affiliated with or endorsed by L&S. "Emotion Control" is a trademark of its
+owner and is used here only to state compatibility.
