@@ -15,11 +15,18 @@ class EmotionControlLight;  // defined in emotion_light.h
 class EmotionFrameListener {
  public:
   virtual ~EmotionFrameListener() = default;
-  // `id` points at the frame's 4 ID bytes, `payload` at all 14 on-air bytes.
+  // `id` points at the frame's logical ID (`id_length` is 3 or 4 bytes),
+  // `payload` at all `payload_length` on-air bytes.
   // `rssi_raw` and `lqi` are the status bytes the chip appends after the frame.
   // `repeat` marks another copy of a press already reported (~150 ms window).
-  virtual void on_emotion_frame(const uint8_t *id, uint8_t cmd, uint8_t val, uint8_t rssi_raw,
-                                uint8_t lqi, const uint8_t *payload, bool repeat) = 0;
+  virtual void on_emotion_frame(const uint8_t *id, uint8_t id_length, uint8_t cmd, uint8_t val,
+                                uint8_t rssi_raw, uint8_t lqi, const uint8_t *payload,
+                                uint8_t payload_length, bool repeat) = 0;
+  // A CRC-valid packet using the same radio settings but a different payload
+  // length. This is useful for discovering protocol variants without treating
+  // random false-sync noise as a real remote.
+  virtual void on_unsupported_emotion_frame(const uint8_t *payload, uint8_t length,
+                                            uint8_t rssi_raw, uint8_t lqi) {}
 };
 
 // --- SPI header bits (CC2500 datasheet, section 10) ---
@@ -61,14 +68,26 @@ class CC2500Emotion : public Component,
 
   void set_gdo0_pin(GPIOPin *pin) { this->gdo0_pin_ = pin; }
   void set_receive(bool receive) { this->receive_ = receive; }
+  // Three bytes select the compact addressed protocol. They are the request
+  // route as seen on air: 0x68, remote address, driver address.
+  void set_remote_id(uint8_t a, uint8_t b, uint8_t c) {
+    this->remote_id_[0] = a;
+    this->remote_id_[1] = b;
+    this->remote_id_[2] = c;
+    this->remote_id_[3] = 0x00;
+    this->remote_id_length_ = 3;
+    this->has_remote_id_ = true;
+  }
   // Optional: without it the hub cannot transmit and only listens (sniffer mode).
   void set_remote_id(uint8_t a, uint8_t b, uint8_t c, uint8_t d) {
     this->remote_id_[0] = a;
     this->remote_id_[1] = b;
     this->remote_id_[2] = c;
     this->remote_id_[3] = d;
+    this->remote_id_length_ = 4;
     this->has_remote_id_ = true;
   }
+  bool is_compact_protocol() const { return this->remote_id_length_ == 3; }
 
   // Frequency offset of the most recent frame, in FSCTRL0 units (1.587 kHz each).
   int8_t last_freq_offset() const { return static_cast<int8_t>(this->last_freqest_); }
@@ -81,11 +100,12 @@ class CC2500Emotion : public Component,
   }
 
   // Emotion Control commands (each transmitted 5x, like the original remote).
-  void send_on(uint8_t color_temp) { this->send_command_(0x01, color_temp); }
+  void send_on(uint8_t color_temp);
   void send_off() { this->send_command_(0x02, 0x00); }
-  // Brightness step commands are single-shot on the real remote, so send them once.
-  void send_brightness_up() { this->send_command_(0x11, 0x00, 1); }
-  void send_brightness_down() { this->send_command_(0x21, 0x00, 1); }
+  // Broadcast remotes use single-shot step commands. Compact remotes emulate a
+  // short 0x10/0x20 hold followed by 0x40, serviced without blocking loop().
+  void send_brightness_up();
+  void send_brightness_down();
   void send_color_temp(uint8_t value) { this->send_command_(0x50, value); }
   void send_pair() { this->send_command_(0x60, 0x00); }
   // Send an arbitrary command/value pair (for experimenting with the protocol).
@@ -115,16 +135,16 @@ class CC2500Emotion : public Component,
   // every config register reads back the value we wrote.
   bool configure_radio_();
 
-  // Build the 14-byte on-air packet for one command and transmit it `repeats` times
-  // (the remote repeats most commands 5x; brightness steps are single-shot).
+  // Build an 8-byte compact or 14-byte broadcast packet and transmit it `repeats`
+  // times (most commands repeat 5x; broadcast brightness steps are single-shot).
   void send_command_(uint8_t cmd, uint8_t val, uint8_t repeats = 5);
   // Block until the current packet has finished transmitting (chip back in IDLE).
   void wait_tx_done_();
 
   // --- Receive (Phase 6): listen for the physical remote's commands ---
-  void enter_rx_();                       // flush RX FIFO and start listening
-  void poll_rx_();                        // called from loop(); reads a complete frame if present
-  void process_packet_(const uint8_t *buf);  // validate a 17-byte frame and act on it
+  void enter_rx_();  // flush RX FIFO, reset the stream parser and start listening
+  void poll_rx_();   // called from loop(); drains variable-length frames from RX FIFO
+  void process_packet_(const uint8_t *buf);  // validate one length-prefixed frame and act on it
   void read_fifo_burst_(uint8_t *buf, uint8_t len);
 
   // Transmit one queued brightness step if the pacing interval has elapsed.
@@ -134,6 +154,7 @@ class CC2500Emotion : public Component,
   EmotionControlLight *light_{nullptr};
   EmotionFrameListener *listener_{nullptr};
   uint8_t remote_id_[4]{0x00, 0x00, 0x00, 0x00};
+  uint8_t remote_id_length_{0};
   bool has_remote_id_{false};
 
   bool receive_{true};
@@ -143,9 +164,16 @@ class CC2500Emotion : public Component,
   // (random, saturating at the +-BW/8 FOC limit both ways), not a crystal mismatch, so
   // there is deliberately no compensation written back into FSCTRL0.
   uint8_t last_freqest_{0};
+  // Variable-length RX stream parser. PKTLEN caps the payload at 14 bytes, and
+  // APPEND_STATUS adds RSSI + LQI after it: 1 + 14 + 2 = 17 bytes maximum.
+  uint8_t rx_buffer_[17]{};
+  uint8_t rx_collected_{0};
+  uint8_t rx_expected_{0};
+  uint32_t rx_partial_since_{0};
   // Deduplicate a remote's repeat burst. Keyed on the sending ID too, so two
   // remotes pressed at once are never collapsed into one event.
   uint8_t rx_last_id_[4]{0xFF, 0xFF, 0xFF, 0xFF};
+  uint8_t rx_last_id_length_{0};
   uint8_t rx_last_cmd_{0xFF};
   uint8_t rx_last_val_{0xFF};
   uint32_t rx_last_time_{0};
@@ -154,6 +182,10 @@ class CC2500Emotion : public Component,
   int pending_brightness_steps_{0};
   uint32_t last_brightness_step_time_{0};
   uint32_t step_interval_ms_{200};
+  bool compact_ramp_active_{false};
+  int8_t compact_ramp_direction_{0};
+  uint32_t compact_ramp_start_time_{0};
+  uint32_t compact_ramp_last_tx_time_{0};
 };
 
 }  // namespace cc2500_emotion

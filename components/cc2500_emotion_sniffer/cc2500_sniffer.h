@@ -23,8 +23,7 @@ class SnifferFrameTrigger
 };
 
 // Logs every Emotion Control frame heard on air, from any remote. Used to find
-// the 4-byte ID of your own remote (press a button, read the log) and to collect
-// commands that are not decoded yet.
+// a compact 3-byte route or broadcast 4-byte ID and to collect unknown commands.
 class CC2500Sniffer : public Component, public cc2500_emotion::EmotionFrameListener {
  public:
   void setup() override;
@@ -36,8 +35,11 @@ class CC2500Sniffer : public Component, public cc2500_emotion::EmotionFrameListe
   void set_remotes_text_sensor(text_sensor::TextSensor *sensor) { this->remotes_sensor_ = sensor; }
   void add_frame_trigger(SnifferFrameTrigger *trigger) { this->frame_triggers_.push_back(trigger); }
 
-  void on_emotion_frame(const uint8_t *id, uint8_t cmd, uint8_t val, uint8_t rssi_raw,
-                        uint8_t lqi, const uint8_t *payload, bool repeat) override;
+  void on_emotion_frame(const uint8_t *id, uint8_t id_length, uint8_t cmd, uint8_t val,
+                        uint8_t rssi_raw, uint8_t lqi, const uint8_t *payload,
+                        uint8_t payload_length, bool repeat) override;
+  void on_unsupported_emotion_frame(const uint8_t *payload, uint8_t length, uint8_t rssi_raw,
+                                    uint8_t lqi) override;
 
  protected:
   // Remotes heard since boot, for the Home Assistant entity. ESPHome entities are
@@ -46,11 +48,12 @@ class CC2500Sniffer : public Component, public cc2500_emotion::EmotionFrameListe
   static const uint8_t MAX_REMOTES = 8;
   struct SeenRemote {
     uint8_t id[4];
+    uint8_t id_length;
     int8_t best_rssi;
   };
   // Strongest RSSI rather than latest: it converges, so the entity stops republishing
-  // instead of churning on every frame of a held button (~85 frames/s).
-  void record_remote_(const uint8_t *id, int rssi_dbm);
+  // instead of churning on every frame of a held button (dozens of frames/s).
+  void record_remote_(const uint8_t *id, uint8_t id_length, int rssi_dbm);
 
   cc2500_emotion::CC2500Emotion *parent_{nullptr};
   text_sensor::TextSensor *remotes_sensor_{nullptr};

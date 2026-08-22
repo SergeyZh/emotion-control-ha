@@ -26,8 +26,8 @@ static const RegSetting CONFIG_REGISTERS[] = {
     // is 0xFF, which is harmless for a transmitter but bad for us: on a false sync
     // detection (we sit at 2436.2 MHz, inside the Wi-Fi band) the chip takes the next
     // noise byte as a length and then waits for up to 255 bytes that never arrive,
-    // going deaf until the FIFO overflows. Emotion frames are always 14 bytes, so
-    // capping here makes the chip discard bogus lengths itself.
+    // going deaf until the FIFO overflows. Supported Emotion frames are 8 or 14
+    // bytes, so this cap still accepts both and discards larger bogus lengths.
     {0x06, 0x0E},  // PKTLEN (deviates from the captured map on purpose - see above)
     {0x07, 0x04},  // PKTCTRL1
     {0x08, 0x05},  // PKTCTRL0  (variable length, hardware CRC, whitening off)
@@ -128,16 +128,43 @@ void CC2500Emotion::loop() {
 }
 
 void CC2500Emotion::service_brightness_queue_() {
+  const uint32_t now = millis();
+
+  if (this->is_compact_protocol()) {
+    // The compact remote has no 0x11/0x21 step commands. Emulate one logical
+    // step as a short hold: repeat 0x10/0x20 for step_interval, then send 0x40.
+    if (this->compact_ramp_active_) {
+      if (now - this->compact_ramp_start_time_ >= this->step_interval_ms_) {
+        this->send_command_(0x40, 0x00);
+        this->compact_ramp_active_ = false;
+        this->compact_ramp_direction_ = 0;
+        this->last_brightness_step_time_ = now;
+      } else if (now - this->compact_ramp_last_tx_time_ >= 40) {
+        this->send_command_(this->compact_ramp_direction_ > 0 ? 0x10 : 0x20, 0x00, 1);
+        this->compact_ramp_last_tx_time_ = now;
+      }
+      return;
+    }
+    if (this->pending_brightness_steps_ == 0)
+      return;
+    this->compact_ramp_direction_ = this->pending_brightness_steps_ > 0 ? 1 : -1;
+    this->pending_brightness_steps_ += this->compact_ramp_direction_ > 0 ? -1 : 1;
+    this->compact_ramp_active_ = true;
+    this->compact_ramp_start_time_ = now;
+    this->compact_ramp_last_tx_time_ = now;
+    this->send_command_(this->compact_ramp_direction_ > 0 ? 0x10 : 0x20, 0x00, 1);
+    return;
+  }
+
   if (this->pending_brightness_steps_ == 0)
     return;
-  const uint32_t now = millis();
   if (now - this->last_brightness_step_time_ < this->step_interval_ms_)
     return;
   if (this->pending_brightness_steps_ > 0) {
-    this->send_brightness_up();
+    this->send_command_(0x11, 0x00, 1);
     this->pending_brightness_steps_--;
   } else {
-    this->send_brightness_down();
+    this->send_command_(0x21, 0x00, 1);
     this->pending_brightness_steps_++;
   }
   this->last_brightness_step_time_ = now;
@@ -146,8 +173,14 @@ void CC2500Emotion::service_brightness_queue_() {
 void CC2500Emotion::dump_config() {
   ESP_LOGCONFIG(TAG, "CC2500 Emotion Control:");
   if (this->has_remote_id_) {
-    ESP_LOGCONFIG(TAG, "  Remote ID: %02X %02X %02X %02X", this->remote_id_[0],
-                  this->remote_id_[1], this->remote_id_[2], this->remote_id_[3]);
+    if (this->is_compact_protocol()) {
+      ESP_LOGCONFIG(TAG, "  Remote route: %02X %02X %02X (compact addressed protocol)",
+                    this->remote_id_[0], this->remote_id_[1], this->remote_id_[2]);
+    } else {
+      ESP_LOGCONFIG(TAG, "  Remote ID: %02X %02X %02X %02X (broadcast protocol)",
+                    this->remote_id_[0], this->remote_id_[1], this->remote_id_[2],
+                    this->remote_id_[3]);
+    }
   } else {
     ESP_LOGCONFIG(TAG, "  Remote ID: not set - transmit disabled, listening only");
   }
@@ -229,31 +262,50 @@ void CC2500Emotion::send_command_(uint8_t cmd, uint8_t val, uint8_t repeats) {
                   "Set remote_id in the cc2500_emotion block.");
     return;
   }
-  // FIFO layout: [len=0x0E][ID:4][cmd][val][00 x6][chk][type=0x16]. The length
-  // byte (0x0E = 14) is not transmitted; the other 14 bytes go on-air.
-  uint8_t packet[15];
-  packet[0] = 0x0E;
-  packet[1] = this->remote_id_[0];
-  packet[2] = this->remote_id_[1];
-  packet[3] = this->remote_id_[2];
-  packet[4] = this->remote_id_[3];
-  packet[5] = cmd;
-  packet[6] = val;
-  for (uint8_t i = 7; i <= 12; i++)
-    packet[i] = 0x00;
-  // chk = 0x7E XOR (all on-air bytes except chk itself). The 6 reserved zeros
-  // and the length byte do not contribute.
-  packet[13] = 0x7E ^ this->remote_id_[0] ^ this->remote_id_[1] ^ this->remote_id_[2] ^
-               this->remote_id_[3] ^ cmd ^ val ^ 0x16;
-  packet[14] = 0x16;
+  uint8_t packet[15]{};
+  uint8_t payload_length;
+  uint8_t checksum_index;
+  if (this->is_compact_protocol()) {
+    // [len=8][0x68][remote][driver][cmd][request=0][value][chk][type=0x16].
+    // The driver replies with the endpoint bytes swapped and request flag set to 1.
+    payload_length = 8;
+    packet[0] = payload_length;
+    packet[1] = this->remote_id_[0];
+    packet[2] = this->remote_id_[1];
+    packet[3] = this->remote_id_[2];
+    packet[4] = cmd;
+    packet[5] = 0x00;
+    packet[6] = val;
+    checksum_index = 7;
+    packet[8] = 0x16;
+  } else {
+    // [len=14][ID:4][cmd][val][00 x6][chk][type=0x16].
+    payload_length = 14;
+    packet[0] = payload_length;
+    packet[1] = this->remote_id_[0];
+    packet[2] = this->remote_id_[1];
+    packet[3] = this->remote_id_[2];
+    packet[4] = this->remote_id_[3];
+    packet[5] = cmd;
+    packet[6] = val;
+    checksum_index = 13;
+    packet[14] = 0x16;
+  }
+  uint8_t checksum = 0x7E;
+  for (uint8_t i = 1; i <= payload_length; i++) {
+    if (i != checksum_index)
+      checksum ^= packet[i];
+  }
+  packet[checksum_index] = checksum;
 
-  ESP_LOGD(TAG, "TX cmd=0x%02X val=0x%02X chk=0x%02X (x%u)", cmd, val, packet[13], repeats);
+  ESP_LOGD(TAG, "TX %s cmd=0x%02X val=0x%02X chk=0x%02X (x%u)",
+           this->is_compact_protocol() ? "compact" : "broadcast", cmd, val, checksum, repeats);
 
   this->transmitting_ = true;
   for (uint8_t rep = 0; rep < repeats; rep++) {
     this->strobe_(CC2500_SIDLE);
     this->strobe_(CC2500_SFTX);
-    this->write_burst_(CC2500_TXFIFO, packet, sizeof(packet));
+    this->write_burst_(CC2500_TXFIFO, packet, payload_length + 1);
     this->strobe_(CC2500_STX);
     this->wait_tx_done_();
   }
@@ -261,12 +313,38 @@ void CC2500Emotion::send_command_(uint8_t cmd, uint8_t val, uint8_t repeats) {
   if (this->receive_) {
     for (uint8_t i = 0; i < 4; i++)
       this->rx_last_id_[i] = this->remote_id_[i];
+    this->rx_last_id_length_ = this->remote_id_length_;
     this->rx_last_cmd_ = cmd;
     this->rx_last_val_ = val;
     this->rx_last_time_ = millis();
     this->enter_rx_();
   }
   this->transmitting_ = false;
+}
+
+void CC2500Emotion::send_on(uint8_t color_temp) {
+  if (this->is_compact_protocol()) {
+    // Compact ON carries zero in the request; set the absolute temperature with
+    // the separate 0x50 command after the driver has been switched on.
+    this->send_command_(0x01, 0x00);
+    this->send_command_(0x50, color_temp);
+  } else {
+    this->send_command_(0x01, color_temp);
+  }
+}
+
+void CC2500Emotion::send_brightness_up() {
+  if (this->is_compact_protocol())
+    this->pending_brightness_steps_++;
+  else
+    this->send_command_(0x11, 0x00, 1);
+}
+
+void CC2500Emotion::send_brightness_down() {
+  if (this->is_compact_protocol())
+    this->pending_brightness_steps_--;
+  else
+    this->send_command_(0x21, 0x00, 1);
 }
 
 void CC2500Emotion::brightness_step(int direction) {
@@ -277,6 +355,9 @@ void CC2500Emotion::brightness_step(int direction) {
 void CC2500Emotion::enter_rx_() {
   this->strobe_(CC2500_SIDLE);
   this->strobe_(CC2500_SFRX);
+  this->rx_collected_ = 0;
+  this->rx_expected_ = 0;
+  this->rx_partial_since_ = 0;
   this->strobe_(CC2500_SRX);
 }
 
@@ -301,51 +382,122 @@ void CC2500Emotion::poll_rx_() {
     this->enter_rx_();
     return;
   }
-  // A complete frame is 1 (length) + 14 (payload) + 2 (appended RSSI/LQI status).
   uint8_t available = b2 & 0x7F;
-  if (available < 17)
-    return;
 
-  // Drain every complete frame. The remote repeats each press ~5x and those copies
-  // are the protocol's error correction - reading one and flushing the rest threw
-  // that redundancy away, so a single corrupted copy lost the whole press.
-  while (available >= 17) {
-    uint8_t buf[17];
-    this->read_fifo_burst_(buf, sizeof(buf));
-    // Read while still in RX: this is the offset estimate for the packet we just took
-    // out of the FIFO. Re-entering RX below would invalidate it.
-    this->last_freqest_ = this->read_status_(CC2500_FREQEST);
-    this->process_packet_(buf);
-    available -= 17;
+  // A maximum-length packet takes far less than 10 ms at 250 kBaud, even with
+  // FEC. Only time out when the FIFO is still empty: logging a dense button-hold
+  // burst can delay loop() for more than 10 ms while the final status byte has
+  // already arrived and is waiting to be consumed.
+  if (this->rx_collected_ != 0 && available == 0 &&
+      (millis() - this->rx_partial_since_) > 10) {
+    ESP_LOGD(TAG, "Incomplete RX frame timed out (%u/%u bytes), restarting RX",
+             this->rx_collected_, this->rx_expected_);
+    this->enter_rx_();
+    return;
   }
-  // Anything left is a partial frame. Restart RX so a stale fragment can never
-  // misalign the frames that follow.
-  this->enter_rx_();
+
+  // Drain the FIFO as a stream of variable-length packets. A FIFO packet is
+  // [length][payload...][RSSI][LQI]. The old fixed 17-byte read concatenated an
+  // 11-byte packet (length 8) with the start of the next repeated packet.
+  while (available != 0) {
+    if (this->rx_collected_ == 0) {
+      this->read_fifo_burst_(this->rx_buffer_, 1);
+      available--;
+      const uint8_t payload_length = this->rx_buffer_[0];
+      if (payload_length > 0x0E) {
+        ESP_LOGD(TAG, "RX length 0x%02X exceeds PKTLEN, restarting RX", payload_length);
+        this->enter_rx_();
+        return;
+      }
+      this->rx_collected_ = 1;
+      this->rx_expected_ = payload_length + 3;  // length byte + payload + RSSI/LQI
+      this->rx_partial_since_ = millis();
+    }
+
+    const uint8_t needed = this->rx_expected_ - this->rx_collected_;
+    const uint8_t take = available < needed ? available : needed;
+    if (take != 0) {
+      this->read_fifo_burst_(this->rx_buffer_ + this->rx_collected_, take);
+      this->rx_collected_ += take;
+      available -= take;
+    }
+
+    if (this->rx_collected_ != this->rx_expected_)
+      return;
+
+    // Read while still in RX: this is the offset estimate for the packet we just
+    // took out of the FIFO. Re-entering RX would invalidate it.
+    this->last_freqest_ = this->read_status_(CC2500_FREQEST);
+    this->process_packet_(this->rx_buffer_);
+    this->rx_collected_ = 0;
+    this->rx_expected_ = 0;
+    this->rx_partial_since_ = 0;
+  }
 }
 
 void CC2500Emotion::process_packet_(const uint8_t *buf) {
   // Every rejection is logged: without this, "the radio hears nothing" and "frames
   // arrive but fail a check" look identical from the log.
-  if (buf[0] != 0x0E) {  // length byte must be 14
-    ESP_LOGD(TAG, "Frame rejected: length byte 0x%02X, expected 0x0E", buf[0]);
-    return;
-  }
-  if (!(buf[16] & 0x80)) {  // CRC_OK is bit 7 of the appended LQI status byte
-    ESP_LOGD(TAG, "Frame rejected: CRC failed (LQI=%u, freq offset %+d = %+d kHz)",
-             buf[16] & 0x7F, static_cast<int8_t>(this->last_freqest_),
+  const uint8_t payload_length = buf[0];
+  const uint8_t rssi = buf[payload_length + 1];
+  const uint8_t lqi = buf[payload_length + 2];
+  if (!(lqi & 0x80)) {  // CRC_OK is bit 7 of the appended LQI status byte
+    ESP_LOGD(TAG,
+             "Frame rejected: length 0x%02X, CRC failed (LQI=%u, freq offset %+d = %+d kHz)",
+             payload_length, lqi & 0x7F, static_cast<int8_t>(this->last_freqest_),
              static_cast<int8_t>(this->last_freqest_) * 1587 / 1000);
     return;
   }
+  const uint8_t *p = buf + 1;
+  uint8_t compact_id[3];
+  const uint8_t *id = nullptr;
+  uint8_t id_length = 0;
+  uint8_t cmd = 0;
+  uint8_t val = 0;
 
-  const uint8_t *p = buf + 1;  // 14 on-air bytes: ID:4, cmd, val, 00x6, chk, type
-  const uint8_t cmd = p[4];
-  const uint8_t val = p[5];
-  // The checksum is computed over the ID bytes we just received, so it validates
-  // frames from any remote - which is what lets a sniffer learn an unknown ID.
-  const uint8_t expect = 0x7E ^ p[0] ^ p[1] ^ p[2] ^ p[3] ^ cmd ^ val ^ 0x16;
-  if (p[13] != 0x16 || p[12] != expect) {
-    ESP_LOGD(TAG, "Frame rejected: type 0x%02X (want 0x16), chk 0x%02X (want 0x%02X)", p[13],
-             p[12], expect);
+  if (payload_length == 0x08) {
+    uint8_t expect = 0x7E;
+    for (uint8_t i = 0; i < payload_length; i++) {
+      if (i != 6)
+        expect ^= p[i];
+    }
+    if (p[0] != 0x68 || p[7] != 0x16 || p[6] != expect) {
+      ESP_LOGD(TAG,
+               "Compact frame rejected: header=0x%02X type=0x%02X chk=0x%02X (want 0x%02X)",
+               p[0], p[7], p[6], expect);
+      return;
+    }
+    // flag=0 is the request from the physical remote; flag=1 is the paired
+    // driver's response and carries the authoritative color-temperature value.
+    // Process only the response, then normalize its swapped route back to the
+    // request order [0x68, remote address, driver address].
+    if (p[4] != 0x01)
+      return;
+    compact_id[0] = p[0];
+    compact_id[1] = p[2];
+    compact_id[2] = p[1];
+    id = compact_id;
+    id_length = 3;
+    cmd = p[3];
+    val = p[5];
+  } else if (payload_length == 0x0E) {
+    id = p;
+    id_length = 4;
+    cmd = p[4];
+    val = p[5];
+    const uint8_t expect = 0x7E ^ p[0] ^ p[1] ^ p[2] ^ p[3] ^ cmd ^ val ^ 0x16;
+    if (p[13] != 0x16 || p[12] != expect) {
+      ESP_LOGD(TAG, "Frame rejected: type 0x%02X (want 0x16), chk 0x%02X (want 0x%02X)", p[13],
+               p[12], expect);
+      return;
+    }
+  } else {
+    if (this->listener_ != nullptr) {
+      this->listener_->on_unsupported_emotion_frame(p, payload_length, rssi, lqi);
+    } else {
+      ESP_LOGD(TAG, "CRC-valid frame uses unsupported length 0x%02X (expected 0x08 or 0x0E)",
+               payload_length);
+    }
     return;
   }
 
@@ -357,13 +509,15 @@ void CC2500Emotion::process_packet_(const uint8_t *buf) {
   // and is therefore never merged. Keyed on ID so two remotes never merge, and so the
   // echo suppression in send_command_ covers it.
   const uint32_t now = millis();
-  const bool same_id = p[0] == this->rx_last_id_[0] && p[1] == this->rx_last_id_[1] &&
-                       p[2] == this->rx_last_id_[2] && p[3] == this->rx_last_id_[3];
+  bool same_id = id_length == this->rx_last_id_length_;
+  for (uint8_t i = 0; same_id && i < id_length; i++)
+    same_id = id[i] == this->rx_last_id_[i];
   const bool repeat = same_id && cmd == this->rx_last_cmd_ && val == this->rx_last_val_ &&
                       (now - this->rx_last_time_) < 150;
   if (!repeat) {
     for (uint8_t i = 0; i < 4; i++)
-      this->rx_last_id_[i] = p[i];
+      this->rx_last_id_[i] = i < id_length ? id[i] : 0x00;
+    this->rx_last_id_length_ = id_length;
     this->rx_last_cmd_ = cmd;
     this->rx_last_val_ = val;
   }
@@ -375,16 +529,20 @@ void CC2500Emotion::process_packet_(const uint8_t *buf) {
   // automations once per press: a held button sends ~85 frames/s, which would flood
   // the Home Assistant event bus.
   if (this->listener_ != nullptr)
-    this->listener_->on_emotion_frame(p, cmd, val, buf[15], buf[16], p, repeat);
+    this->listener_->on_emotion_frame(id, id_length, cmd, val, rssi, lqi, p, payload_length,
+                                      repeat);
 
   if (repeat)
     return;  // control path acts once per press
 
   if (!this->has_remote_id_)
     return;  // sniffer-only: nothing to match against
-  if (p[0] != this->remote_id_[0] || p[1] != this->remote_id_[1] || p[2] != this->remote_id_[2] ||
-      p[3] != this->remote_id_[3])
-    return;  // a different remote
+  if (id_length != this->remote_id_length_)
+    return;
+  for (uint8_t i = 0; i < id_length; i++) {
+    if (id[i] != this->remote_id_[i])
+      return;  // a different remote/route
+  }
 
   ESP_LOGI(TAG, "RX from remote: cmd=0x%02X val=0x%02X", cmd, val);
   if (this->light_ != nullptr)

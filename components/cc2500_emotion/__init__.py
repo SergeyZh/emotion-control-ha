@@ -21,12 +21,13 @@ CC2500Emotion = cc2500_emotion_ns.class_(
 
 
 def _validate_remote_id(value):
-    """Accept a 4-byte remote ID as a hex string, e.g. '68049F25' or '68:04:9F:25'."""
+    """Accept a 3-byte compact route or a 4-byte broadcast remote ID."""
     value = cv.string_strict(value)
     cleaned = value.replace(" ", "").replace(":", "")
-    if len(cleaned) != 8:
+    if len(cleaned) not in (6, 8):
         raise cv.Invalid(
-            "remote_id must be 4 bytes (8 hex digits), e.g. '68049F25'"
+            "remote_id must be 3 or 4 bytes (6 or 8 hex digits), "
+            "e.g. '68ABF2' or '68049F25'"
         )
     try:
         data = bytes.fromhex(cleaned)
@@ -68,7 +69,10 @@ async def to_code(config):
 
     if CONF_REMOTE_ID in config:
         rid = config[CONF_REMOTE_ID]
-        cg.add(var.set_remote_id(rid[0], rid[1], rid[2], rid[3]))
+        if len(rid) == 3:
+            cg.add(var.set_remote_id(rid[0], rid[1], rid[2]))
+        else:
+            cg.add(var.set_remote_id(rid[0], rid[1], rid[2], rid[3]))
 
     cg.add(var.set_receive(config[CONF_RECEIVE]))
     cg.add(var.set_step_interval(config[CONF_STEP_INTERVAL]))

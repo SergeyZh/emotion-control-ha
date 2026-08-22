@@ -1,9 +1,10 @@
-# Listen-only mode: find the ID of your own Emotion Control remote.
+# Listen-only mode: find the ID/route of your own Emotion Control remote.
 #
 # Flash with: esphome run sniffer.yaml --device /dev/cu.usbserial-0001
 # Then press buttons on your remotes one by one - their IDs show up in the log:
 #
 #   [I][cc2500_emotion_sniffer]: remote 68049F25  cmd=0x01 (on)  val=0x80  RSSI=-38 dBm  LQI=2
+#   [I][cc2500_emotion_sniffer]: remote 68ABF2    cmd=0x01 (on)  val=0x7D  RSSI=-65 dBm  LQI=13
 #
 # Your own remote is easy to tell apart by RSSI: it is in your hand, so its
 # signal is the strongest. Put the ID you found into `remote_id` of the
@@ -42,6 +43,6 @@ cc2500_emotion:
 
 cc2500_emotion_sniffer:
   cc2500_emotion_id: emotion
-  # Print all 14 frame bytes for every command. Unknown commands are printed
+  # Print all 8 or 14 frame bytes for every command. Unknown commands are printed
   # in full regardless.
   dump_raw: false

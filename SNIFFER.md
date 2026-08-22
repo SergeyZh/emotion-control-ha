@@ -28,20 +28,39 @@ Press buttons on the remote next to the board. Every recognized frame is logged 
 
 ```
 [I][cc2500_emotion_sniffer]: remote 68049F25  cmd=0x01 (on)  val=0x80  RSSI=-38 dBm  LQI=2  offset=+3 kHz
+[I][cc2500_emotion_sniffer]: remote 68ABF2    cmd=0x01 (on)  val=0x7D  RSSI=-65 dBm  LQI=13 offset=-4 kHz
 ```
 
 Your remote is the one with a noticeably higher `RSSI`: it is in your hand. Put the ID you found into
 `remote_id` in the production config.
+
+The first line is the 14-byte broadcast variant and yields an eight-digit ID. The second is the
+8-byte addressed variant and yields a six-digit request route: `68`, remote address, driver address.
+The driver replies with the two endpoint bytes swapped; the component normalizes the reply before
+logging it, so copy the six digits exactly as shown.
+
+### If an older build rejects length `0x08`
+
+The two-button remote used with **L&S Emotion Driver ED 12/30-1** uses the compact 8-byte variant.
+Its right button toggles power on a short press and controls brightness while held; the left button
+changes color temperature. Older versions only knew 14-byte frames and logged:
+
+```
+Frame rejected: length byte 0x08, expected 0x0E
+```
+
+This is a real Emotion frame, not interference. Update to a version with compact-protocol support;
+the sniffer will then report a six-digit route suitable for `remote_id`.
 
 **You do not have to guess the ID, and random noise cannot fake one.** Frames are checked by the
 hardware CRC and by a checksum computed **from the received ID bytes themselves** — which is why the
 sniffer validates frames from any remote, not only from a previously known one. Either everything
 adds up or the frame is dropped.
 
-Unknown commands are printed together with the full frame (all 14 bytes) — the six "reserved" bytes
-may turn out to be non-zero. This is also the mode for extending the command map: if your remote can
-do something missing from the [command table](CONFIGURATION.md#protocol-commands), the log will show
-both the code and the bytes.
+Unknown commands are printed with the full 8- or 14-byte frame. In a 14-byte frame the six
+"reserved" bytes may turn out to be non-zero. This is also the mode for extending the command map:
+if your remote can do something missing from the [command table](CONFIGURATION.md#protocol-commands),
+the log shows both the code and the bytes.
 
 ## Options
 
@@ -55,7 +74,7 @@ cc2500_emotion_sniffer:
 | Option | Default | Description |
 |---|---|---|
 | `cc2500_emotion_id` | (auto) | Reference to the `cc2500_emotion` hub. Reception (`receive`) is forced on — a listener without reception is pointless |
-| `dump_raw` | `false` | Print all 14 frame bytes for **every** command. Unknown ones are always printed in full |
+| `dump_raw` | `false` | Print all 8 or 14 frame bytes for **every** command. Unknown ones are always printed in full |
 | `on_frame` | — | Automation on a received frame, **once per press** — see below |
 | `id` | (auto) | Identifier referenced by the `text_sensor` platform |
 
@@ -89,8 +108,7 @@ The state is every remote heard since boot, each with its **best** signal level:
 
 Press a button on another remote and it appears in the list. Yours is identified by signal strength.
 The best rather than the latest level is kept on purpose: that way the value converges and the entity
-stops updating, instead of twitching on every frame — a held button produces about 85 of them per
-second.
+stops updating, instead of twitching on every frame — a held button produces dozens per second.
 
 ⚠️ **ESPHome entities are created at compile time**, so an entity per remote discovered on the air is
 technically impossible — `esp32_ble_tracker` works the same way (only addresses written into the YAML
@@ -106,7 +124,7 @@ are not duplicated). This is what Home Assistant automations and the live air ta
 
 | Variable | Type | Value |
 |---|---|---|
-| `remote_id` | `std::string` | Remote ID, 8 hex characters (`"6804F74D"`) |
+| `remote_id` | `std::string` | Remote ID/route, 6 or 8 hex characters (`"68ABF2"` or `"6804F74D"`) |
 | `command` | `uint8_t` | Command byte |
 | `command_name` | `std::string` | Decoded command name, or `"UNKNOWN"` |
 | `value` | `uint8_t` | Value byte |
@@ -117,8 +135,9 @@ are not duplicated). This is what Home Assistant automations and the live air ta
 want your own, filter by `remote_id` in the automation's condition.
 
 **Why the trigger is deduplicated while the log is not.** The log sees every copy of a frame (that is
-the link-quality indicator), whereas the trigger emits events: a held button produces ~85 frames per
-second, and as many events would take down the Home Assistant API. So one press equals one firing.
+the link-quality indicator), whereas the trigger emits events: a held button produces dozens of
+frames per second, and as many events would take down the Home Assistant API. So one press equals one
+firing.
 
 ### A live air table in Home Assistant
 

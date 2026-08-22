@@ -3,9 +3,9 @@
 # The BOOT button (GPIO0) on the board toggles the lamp on/off (phase 3, live test).
 # Flash with: esphome run bench.yaml
 #
-# Needs secrets.yaml (it is in .gitignore) with your remote's ID:
+# Needs secrets.yaml (it is in .gitignore) with your remote's ID/route:
 #   emotion_remote_id: "68049F25"
-# You can find your remote's ID with sniffer.yaml.
+# Compact example: "68ABF2". Find your value with sniffer.yaml.
 
 esphome:
   name: emotion-bench

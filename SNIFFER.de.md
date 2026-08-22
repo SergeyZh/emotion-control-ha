@@ -29,21 +29,39 @@ Drücken Sie Tasten auf der Fernbedienung neben dem Board. Jeder erkannte Frame 
 
 ```
 [I][cc2500_emotion_sniffer]: remote 68049F25  cmd=0x01 (on)  val=0x80  RSSI=-38 dBm  LQI=2  offset=+3 kHz
+[I][cc2500_emotion_sniffer]: remote 68ABF2    cmd=0x01 (on)  val=0x7D  RSSI=-65 dBm  LQI=13 offset=-4 kHz
 ```
 
 Ihre Fernbedienung ist die mit deutlich höherem `RSSI`: Sie halten sie in der Hand. Tragen Sie die
 gefundene ID in `remote_id` der Produktivkonfiguration ein.
+
+Die erste Zeile zeigt die 14-Byte-Broadcast-Variante mit achtstelliger ID. Die zweite zeigt die
+adressierte 8-Byte-Variante mit sechsstelliger Anforderungsroute: `68`, Fernbedienungsadresse,
+Treiberadresse. Der Treiber vertauscht in der Antwort die beiden Endpunkte; die Komponente
+normalisiert sie vor dem Loggen. Kopieren Sie daher genau die angezeigten sechs Zeichen.
+
+### Wenn ein älterer Build die Länge `0x08` verwirft
+
+Die Zwei-Tasten-Fernbedienung des **L&S Emotion Driver ED 12/30-1** nutzt die kompakte
+8-Byte-Variante. Ein kurzer Druck rechts schaltet ein/aus, Halten regelt die Helligkeit; die linke
+Taste ändert die Farbtemperatur. Ältere Versionen kannten nur 14-Byte-Frames und meldeten:
+
+```
+Frame rejected: length byte 0x08, expected 0x0E
+```
+
+Das ist ein echter Emotion-Frame, keine Störung. Aktualisieren Sie auf eine Version mit Unterstützung
+des kompakten Protokolls; der Sniffer zeigt dann eine sechsstellige Route für `remote_id`.
 
 **Die ID muss nicht geraten werden, und zufälliges Rauschen kann keine vortäuschen.** Frames werden
 per Hardware-CRC und über eine Prüfsumme geprüft, die **aus den empfangenen ID-Bytes selbst** berechnet
 wird — deshalb validiert der Sniffer Frames beliebiger Fernbedienungen, nicht nur bereits bekannter.
 Entweder es passt alles zusammen, oder der Frame wird verworfen.
 
-Unbekannte Befehle werden samt vollständigem Frame (alle 14 Byte) ausgegeben — die sechs
-„reservierten“ Bytes können sich als nicht null erweisen. Das ist auch der Modus zum Erweitern der
+Unbekannte Befehle werden samt vollständigem 8- oder 14-Byte-Frame ausgegeben. Bei 14 Byte können
+die sechs „reservierten“ Bytes ungleich null sein. Das ist auch der Modus zum Erweitern der
 Befehlstabelle: Kann Ihre Fernbedienung etwas, das in der
-[Befehlstabelle](CONFIGURATION.de.md#protokollbefehle) fehlt, zeigt das Log sowohl den Code als auch
-die Bytes.
+[Befehlstabelle](CONFIGURATION.de.md#protokollbefehle) fehlt, zeigt das Log Code und Bytes.
 
 ## Optionen
 
@@ -57,7 +75,7 @@ cc2500_emotion_sniffer:
 | Option | Standard | Beschreibung |
 |---|---|---|
 | `cc2500_emotion_id` | (auto) | Verweis auf den Hub `cc2500_emotion`. Der Empfang (`receive`) wird zwingend eingeschaltet — ein Zuhörer ohne Empfang wäre sinnlos |
-| `dump_raw` | `false` | Alle 14 Frame-Bytes für **jeden** Befehl ausgeben. Unbekannte werden ohnehin immer vollständig ausgegeben |
+| `dump_raw` | `false` | Alle 8 oder 14 Frame-Bytes für **jeden** Befehl ausgeben. Unbekannte werden ohnehin immer vollständig ausgegeben |
 | `on_frame` | — | Automatisierung auf einen empfangenen Frame, **einmal pro Tastendruck** — siehe unten |
 | `id` | (auto) | Kennung, auf die die `text_sensor`-Plattform verweist |
 
@@ -92,7 +110,7 @@ Der Zustand umfasst alle seit dem Start gehörten Fernbedienungen, jede mit ihre
 Drücken Sie eine Taste auf der nächsten Fernbedienung, erscheint sie in der Liste. Die eigene erkennen
 Sie an der Signalstärke. Bewusst wird der beste und nicht der letzte Wert behalten: So konvergiert der
 Wert und die Entität hört auf zu aktualisieren, anstatt bei jedem Frame zu zappeln — eine gehaltene
-Taste erzeugt etwa 85 Frames pro Sekunde.
+Taste erzeugt Dutzende Frames pro Sekunde.
 
 ⚠️ **Entitäten entstehen in ESPHome zur Kompilierzeit**, eine Entität pro im Funk entdeckter
 Fernbedienung ist daher technisch unmöglich — `esp32_ble_tracker` ist genauso gebaut (in die
@@ -110,7 +128,7 @@ Live-Funktabelle auf.
 
 | Variable | Typ | Bedeutung |
 |---|---|---|
-| `remote_id` | `std::string` | Fernbedienungs-ID, 8 Hex-Zeichen (`"6804F74D"`) |
+| `remote_id` | `std::string` | Fernbedienungs-ID/-Route, 6 oder 8 Hex-Zeichen (`"68ABF2"` oder `"6804F74D"`) |
 | `command` | `uint8_t` | Befehlsbyte |
 | `command_name` | `std::string` | Aufgelöster Befehlsname oder `"UNKNOWN"` |
 | `value` | `uint8_t` | Wertebyte |
@@ -122,7 +140,7 @@ Wollen Sie nur die eigenen, filtern Sie in der Bedingung der Automatisierung nac
 
 **Warum der Trigger dedupliziert ist, das Log aber nicht.** Das Log sieht jede Kopie eines Frames (das
 ist der Indikator für die Verbindungsqualität), der Trigger dagegen erzeugt Ereignisse: Eine gehaltene
-Taste liefert ~85 Frames pro Sekunde, und ebenso viele Ereignisse würden die Home-Assistant-API
+Taste liefert Dutzende Frames pro Sekunde, und ebenso viele Ereignisse würden die Home-Assistant-API
 lahmlegen. Deshalb gilt: ein Tastendruck, eine Auslösung.
 
 ### Eine Live-Funktabelle in Home Assistant
