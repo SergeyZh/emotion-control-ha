@@ -42,7 +42,7 @@ cc2500_emotion:
   id: emotion
   cs_pin: GPIO5
   gdo0_pin: GPIO4         # optional
-  remote_id: "68049F25"   # ID Ihrer Fernbedienung (4 Byte hex)
+  remote_id: "68049F25"   # 4-Byte-ID oder 3-Byte-Route wie "68ABF2"
   receive: true           # Funk mithören und Zustand synchronisieren
   step_interval: 200ms    # Pause zwischen Helligkeitsschritten
 
@@ -69,7 +69,7 @@ Besitzt das CC2500-Modul: konfiguriert es, sendet und empfängt Frames. Die Komp
 |---|---|---|
 | `cs_pin` | — (**erforderlich**) | CS-Pin (`CSn` des Moduls) |
 | `gdo0_pin` | — (opt.) | `GDO0` zur Erkennung des Sendeendes. Ohne ihn wird das Register `MARCSTATE` abgefragt |
-| `remote_id` | — (opt.) | Fernbedienungs-ID: 4 Byte hex, `"68049F25"` oder `"68:04:9F:25"`. **Ohne sie ist das Senden deaktiviert**, das Gerät hört nur zu |
+| `remote_id` | — (opt.) | Fernbedienungs-ID/-Route: 3 oder 4 Byte hex, etwa `"68ABF2"` oder `"68049F25"`. Drei Byte wählen das kompakte adressierte Protokoll, vier das Broadcast-Protokoll. **Ohne Wert ist das Senden deaktiviert**, das Gerät hört nur zu |
 | `receive` | `true` | Chip im Empfang halten: Befehle der physischen Fernbedienung aktualisieren den Zustand in Home Assistant |
 | `step_interval` | `200ms` | Pause zwischen einzelnen Sendungen von Helligkeitsschritten |
 | `id` | (auto) | Kennung für Verweise aus `light` und aus Lambdas |
@@ -82,10 +82,21 @@ Leuchten steuern. Deshalb ist die Option optional und ohne Standardwert: Ist sie
 verweigert die Komponente das Senden (mit Fehler im Log) und arbeitet als Empfänger. Wie Sie Ihre ID
 ermitteln — [SNIFFER.de.md](SNIFFER.de.md).
 
-**Wozu `step_interval` dient.** Die Leuchte fasst Helligkeitsschritte, die unmittelbar aufeinander
-folgen (~14 ms), zu einem zusammen. Deshalb laufen Schritte über eine nicht blockierende
-Warteschlange: eine Sendung pro `step_interval`. Verliert Ihre Leuchte bei schneller Reglerbewegung
-Schritte, erhöhen Sie den Wert; wirkt der Durchlauf über alle Stufen zu langsam, verkleinern Sie ihn.
+Die Länge von `remote_id` wählt das Protokoll automatisch:
+
+| Variante | `remote_id` | Frame | Verifizierter Aufbau |
+|---|---|---|---|
+| Broadcast | 4 Byte / 8 Hex-Zeichen | 14-Byte-Payload | Ursprüngliche Emotion-Fernbedienung/-Leuchte |
+| Kompakt adressiert | 3 Byte / 6 Hex-Zeichen: `68`, Fernbedienungsadresse, Treiberadresse | 8-Byte-Anforderung und -Antwort | Zwei-Tasten-Fernbedienung mit **L&S Emotion Driver ED 12/30-1** |
+
+Kopieren Sie das Beispiel `68ABF2` nicht: Es stammt aus einer konkreten Installation. Verwenden Sie
+die sechs oder acht Zeichen, die der Sniffer für Ihr System meldet.
+
+**Wozu `step_interval` dient.** Bei der Broadcast-Variante fasst die Leuchte dicht aufeinanderfolgende
+Helligkeitsschritte zusammen; die Warteschlange sendet daher einen nativen Schritt pro Intervall.
+Die kompakte Variante kennt keinen Schrittbefehl: Ein logischer HA-Schritt wird zu einer wiederholten
+`0x10`/`0x20`-Rampe für `step_interval`, gefolgt von `0x40`. Erhöhen Sie das Intervall für größere,
+verkleinern Sie es für kleinere Helligkeitsänderungen.
 
 ### Öffentliche Methoden (für Lambdas)
 
@@ -93,12 +104,12 @@ Verfügbar als `id(emotion).…` in jedem `lambda`:
 
 | Methode | Wirkung |
 |---|---|
-| `send_on(uint8_t color_temp)` | Mit der angegebenen Farbtemperatur einschalten (`0x80` ist die Mitte) |
+| `send_on(uint8_t color_temp)` | Mit der angegebenen Farbtemperatur einschalten (`0x80` ist die Mitte). Im kompakten Modus folgt auf ON ein separater Farbtemperaturbefehl |
 | `send_off()` | Ausschalten |
 | `send_color_temp(uint8_t value)` | Farbtemperatur: `0x00` warm … `0xFF` kalt |
 | `brightness_step(int direction)` | Helligkeitsschritt: `1` heller, `-1` dunkler. Aktualisiert Leuchte und Zustand in Home Assistant. Sendet **immer**, auch am Endanschlag (Resynchronisierung UI ↔ Leuchte) |
 | `send_brightness_up()` / `send_brightness_down()` | Helligkeitsschritt am HA-Zustand vorbei — nur senden, Tracker bleiben unberührt |
-| `send_pair()` | Kopplung — die eigene `remote_id` einer Leuchte im Lernmodus verkünden |
+| `send_pair()` | Kopplung — die eigene `remote_id` einer Leuchte im Lernmodus verkünden. Nur für die 14-Byte-Variante verifiziert |
 | `send_raw(uint8_t cmd, uint8_t val)` | Beliebiger Befehl — für Protokollexperimente |
 
 Für Schaltflächen in Home Assistant brauchen Sie `brightness_step()`: Es hält HA-Zustand und Leuchte
@@ -113,7 +124,7 @@ Ein gewöhnliches ESPHome-Licht vom Typ `COLOR_TEMPERATURE`.
 | Option | Standard | Beschreibung |
 |---|---|---|
 | `cc2500_emotion_id` | (auto) | Verweis auf den Hub `cc2500_emotion` |
-| `brightness_levels` | `5` | Anzahl der diskreten Helligkeitsstufen der Leuchte (2…32) |
+| `brightness_levels` | `5` | Anzahl der in HA dargestellten logischen Helligkeitsstufen (2…32) |
 | `ramp_duration` | `1000ms` | Dauer eines vollen Helligkeitsdurchlaufs min↔max — zur Schätzung einer gehaltenen Taste auf der Fernbedienung |
 | `cold_white_color_temperature` | `6500 K` | Kaltes Ende des Bereichs |
 | `warm_white_color_temperature` | `2700 K` | Warmes Ende des Bereichs |
@@ -123,13 +134,11 @@ Ein gewöhnliches ESPHome-Licht vom Typ `COLOR_TEMPERATURE`.
 
 Dazu die Standardschlüssel von `light` (`name`, `icon`, `id`, …).
 
-**Zur Helligkeit.** Home Assistant hängt an jede Entität mit Farbtemperatur zwingend einen
-Helligkeitsregler — „Farbtemperatur ohne Helligkeit“ ist an einem einzelnen Licht nicht möglich.
-Deshalb ist das Modell absolut: Die Komponente verfolgt die aktuelle Stufe und schrittet bei einer
-Änderung die Differenz, ohne Flackern. Fünf Stufen erscheinen als
-**1 / 25 / 50 / 75 / 100 %** (die unterste liegt auf 1 %, weil 0 % in Home Assistant „aus“ bedeutet).
-An den Endanschlägen wird ein zusätzlicher Schritt als Reserve gesendet — die Leuchte begrenzt selbst,
-und das ist ein Resynchronisierungspunkt.
+**Zur Helligkeit.** Home Assistant hängt an jede Entität mit Farbtemperatur einen Helligkeitsregler.
+Die Komponente verfolgt eine konfigurierbare Anzahl logischer Stufen; fünf erscheinen als
+**1 / 25 / 50 / 75 / 100 %**. Broadcast-Geräte wechseln mit nativen `0x11`/`0x21`-Schritten.
+Kompakte Geräte kennen nur kontinuierliche Rampen, daher wird ein logischer Schritt durch eine kurze
+zeitgesteuerte `0x10`/`0x20`-Rampe mit anschließendem `0x40` angenähert.
 
 **Zu `restore_mode`.** Der Standardwert weicht bewusst vom Basiswert `ALWAYS_OFF` ab, der den Zustand
 bei jedem Neustart verlor. Der wiederhergestellte Zustand wird **nicht an die Leuchte gesendet**: Sie
@@ -195,7 +204,7 @@ wieder aus.
 | Entität | Funktion |
 |---|---|
 | **Licht** „L&S Emotion“ | Ein/aus, Helligkeit (5 Stufen → 1/25/50/75/100 %), Farbtemperatur |
-| **Schaltfläche** „Pair“ | `remote_id` einer Leuchte im Lernmodus verkünden |
+| **Schaltfläche** „Pair“ | `remote_id` einer Leuchte im Lernmodus verkünden (nur für Broadcast verifiziert) |
 | **Schaltfläche** „Brighter“ / „Dimmer“ | Ein Helligkeitsschritt, wird immer gesendet |
 | **Schaltfläche** „Raw send“ | Den Befehl aus den Feldern unten senden |
 | **Text** „Raw cmd (hex)“ / „Raw value (hex)“ | Die Bytes für „Raw send“ |
@@ -206,16 +215,14 @@ und Farbtemperatur exakt, Helligkeit über Schritte oder über die Ramp-Schätzu
 
 ## Eigenschaften und Einschränkungen
 
-- **Es gibt keine Rückmeldung von der Leuchte.** Das Protokoll ist unidirektional: Die Leuchte
-  antwortet nie. Der Zustand in Home Assistant ist eine Schätzung. Verlässliche Fixpunkte: absolute
-  Befehle (ein/aus, Farbtemperatur), die Endanschläge der Helligkeit und die von der Fernbedienung
-  empfangenen Befehle.
-- **Die Helligkeit hat 5 diskrete Stufen.** Der Regler rastet auf 1/25/50/75/100 %. Ein Durchlauf von
-  Anschlag zu Anschlag dauert bis zu ~1 s, weil die Schritte einzeln und um `step_interval` versetzt
-  gesendet werden.
-- **Helligkeitsbefehle sendet die Fernbedienung einzeln** (anders als ein/aus, das fünfmal wiederholt
-  wird), deshalb geht eine einzelne Sendung im Funk gelegentlich verloren. Das korrigiert sich an den
-  Endanschlägen und bei der nächsten Aktion.
+- **Die Rückmeldung hängt von der Variante ab.** Die Broadcast-Leuchte antwortet nicht, daher hält HA
+  eine Schätzung. Der kompakte ED 12/30-1 antwortet auf adressierte Anforderungen mit vertauschten
+  Endpunktadressen, sendet aber keine selbstständigen Zustandsmeldungen. Fernbedienungsverkehr
+  aktualisiert HA in beiden Fällen.
+- **Die Helligkeit ist logisch, nicht zwingend nativ.** Die standardmäßigen fünf Stufen entsprechen
+  1/25/50/75/100 %. Broadcast nutzt native Schritte, kompakt nutzt angenäherte zeitgesteuerte Rampen.
+- **Broadcast-Helligkeitsschritte sind einzelne Sendungen** und können gelegentlich verloren gehen.
+  Kompakt wiederholt den Rampenstart und beendet ihn mit `0x40`.
 - **Eine gehaltene Taste auf der Fernbedienung** (`0x10`/`0x20`, gestoppt mit `0x40`) wird über die
   Zeit anhand von `ramp_duration` geschätzt — also ungenau. Geht das `0x40` verloren, wird der
   Durchlauf per Timeout beendet.
@@ -231,26 +238,28 @@ und Farbtemperatur exakt, Helligkeit über Schritte oder über die Ramp-Schätzu
 
 | cmd | Wirkung | val |
 |---|---|---|
-| `0x01` | Einschalten | aktuelle Farbtemperatur |
+| `0x01` | Einschalten | Broadcast: aktuelle Farbtemperatur; kompakte Anforderung: `0x00` |
 | `0x02` | Ausschalten | `0x00` |
-| `0x11` / `0x21` | Helligkeit einen Schritt hoch / runter | `0x00` |
-| `0x10` / `0x20` | Weichen Durchlauf hoch / runter starten (~1 s von Anschlag zu Anschlag) | `0x00` |
+| `0x11` / `0x21` | Helligkeit einen Schritt hoch / runter (nur Broadcast) | `0x00` |
+| `0x10` / `0x20` | Weichen Durchlauf hoch / runter starten | `0x00` |
 | `0x40` | Durchlauf stoppen | `0x00` |
 | `0x50` | Farbtemperatur (`0x00` warm … `0xFF` kalt) | Stufe |
-| `0x60` | Kopplung | `0x00` |
+| `0x60` | Kopplung (nur für Broadcast verifiziert) | `0x00` |
 
 ⚠️ `0x10`/`0x20` sind **kein** sofortiges Maximum/Minimum, sondern der Start eines weichen Durchlaufs:
-Die Endstufe hängt davon ab, wann das `0x40` eintrifft. Die Komponente sendet sie nie — sie erreicht
-die Endanschläge stattdessen über Schritte mit Reserve. Beim Empfang erkennt sie sie sehr wohl: Genau
-das sendet die Fernbedienung bei gehaltener Taste.
+Die Endstufe hängt davon ab, wann `0x40` eintrifft. Der Broadcast-Pfad sendet `0x11`/`0x21`-Schritte;
+der kompakte Pfad sendet bewusst zeitgesteuerte Rampen, weil keine eigenen Schrittbefehle beobachtet
+wurden.
 
 Eine gehaltene Taste ist keine einzelne Sendung, sondern ein Strom: `0x10`/`0x20` wiederholen sich
 etwa **alle 12 ms**, solange die Taste unten ist, und enden mit einem einzelnen `0x40`.
 
-Befehle außerhalb dieser Tabelle protokolliert der Sniffer als `UNKNOWN` samt aller 14 Frame-Bytes —
-kann Ihre Fernbedienung also mehr, sehen Sie es sofort und können es über „Raw send“ nachbauen.
+Befehle außerhalb dieser Tabelle protokolliert der Sniffer als `UNKNOWN` samt aller 8 oder 14
+Frame-Bytes; neue Befehle lassen sich so erfassen und über „Raw send“ ausprobieren.
 
-### Frame-Format
+### Frame-Formate
+
+Broadcast-Variante (im CC2500-FIFO steht das Längenbyte vor dem 14-Byte-Payload):
 
 ```
 0E | ID₀ ID₁ ID₂ ID₃ | cmd | val | 00 00 00 00 00 00 | chk | 16
@@ -258,8 +267,20 @@ kann Ihre Fernbedienung also mehr, sehen Sie es sofort und können es über „R
 
 `0E` ist die Länge (14 Byte), `chk = 0x7E ⊕ ID₀ ⊕ ID₁ ⊕ ID₂ ⊕ ID₃ ⊕ 0x16 ⊕ cmd ⊕ val`.
 
+Kompakte adressierte Variante:
+
+```
+08 | 68 | FERNBEDIENUNG | TREIBER | cmd | 00 | val | chk | 16   Anforderung
+08 | 68 | TREIBER | FERNBEDIENUNG | cmd | 01 | val | chk | 16   Antwort
+```
+
+Der Treiber vertauscht in seiner Antwort die Endpunktadressen und setzt das Richtungsbyte auf `01`.
+Die konfigurierte Drei-Byte-Route steht immer in Anforderungsreihenfolge `68 FERNBEDIENUNG TREIBER`;
+empfangene Antworten werden darauf normalisiert. In beiden Richtungen ist `chk` das XOR von `0x7E`
+mit jedem Payload-Byte außer `chk` selbst.
+
 Modulation (MSK, 250 kBaud, 2436,2 MHz), das Sync-Wort `0xD391`, FEC und die CRC erledigt der CC2500
-per Hardware anhand der geladenen Registerkarte — die Software stellt nur diese 14 Byte zusammen.
+per Hardware anhand der geladenen Registerkarte — die Software stellt das 8- oder 14-Byte-Payload zusammen.
 
 Die vollständige Protokollanalyse — HF-Parameter, alle 45 Register, `PATABLE`, Vorgehen beim Reverse
 Engineering — steht in

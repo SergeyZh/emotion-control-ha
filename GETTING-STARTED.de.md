@@ -5,9 +5,9 @@
 # Erste Schritte: eine L&S-Leuchte in Home Assistant
 
 Diese Anleitung führt von „ESP32 gekauft“ bis „die Leuchte wird aus Home Assistant gesteuert“.
-ESPHome-Erfahrung ist nicht nötig, ein Lötkolben allerdings schon: Die Leitungen zum CC2500-Modul
-müssen gelötet werden (Details in Schritt 0). Rechnen Sie mit etwa einer Stunde, davon geht der
-größte Teil für den ersten Firmware-Build drauf.
+ESPHome-Erfahrung ist nicht nötig. Ein CC2500-Modul mit montierter Stiftleiste lässt sich ohne Löten
+anschließen; beim kleinen Pad-Modul sind weiterhin sechs Lötstellen nötig. Rechnen Sie mit etwa einer
+Stunde, davon geht der größte Teil für den ersten Firmware-Build drauf.
 
 Die Idee ist einfach: **Der ESP32 gibt sich als Ihre Fernbedienung aus.** Er sendet dieselben Befehle
 mit derselben Kennung, deshalb gehorcht die Leuchte ihm sofort — ohne Kopplung und ohne Eingriff in
@@ -20,18 +20,16 @@ Sie brauchen:
 | Was | Anforderungen | Anmerkung |
 |---|---|---|
 | **ESP32** | Beliebiges Board mit USB | Verifiziert mit einem DevKit V1 (ESP-WROOM-32) |
-| **CC2500-Modul** | 2,4 GHz, Quarz **26,000 MHz** | [Dieses von AliExpress](https://de.aliexpress.com/item/1005005501196142.html) ist verifiziert. Verkauft als „CC2500 module 2.4G“ |
-| **Lötkolben** | Gewöhnlich, mit nicht zu grober Spitze | Die Leitungen werden an das Modul gelötet, einen Steckverbinder gibt es nicht |
-| Leitungen | 6 Stück, ein Ende als Buchse für die ESP32-Stiftleiste | Das andere Ende wird an das Modul gelötet |
+| **CC2500-Modul** | 2,4 GHz, Quarz **26,000 MHz** | Verifiziert: [kleines Pad-Modul](https://de.aliexpress.com/item/1005005501196142.html) oder [TinyTronics-Modul mit Stiften](https://www.tinytronics.nl/en/communication-and-signals/wireless/rf/modules/cc2500-wireless-rf-module-2.4ghz) |
+| **Lötkolben** | Optional | Nur für ein Modul ohne montierte Stifte nötig |
+| Leitungen | 6 oder 7 Dupont-Buchsenleitungen | Beim Pad-Modul wird ein Ende angelötet |
 
-⚠️ **Das Modul muss gelötet werden.** Alle auffindbaren CC2500-Module (auch das oben verlinkte) kommen
-ohne Stiftleiste: neun flache Pads an der Unterkante einer Platine von 12 × 19 mm im Raster
-**1,27 mm**. Eine Stiftleiste mit 2,54 mm passt in dieses Raster nicht, und ein Adapter liegt nie bei
-— die Leitungen gehen also direkt auf die Pads. Es sind nur sechs Lötstellen (`SI`, `SCLK`, `SO`,
-`CSn`, `VDD`, `VSS`), aber sie sind klein: Nehmen Sie dünne Litze (PTFE-isolierten Schaltdraht oder
-eine einzelne Ader aus einem Flachbandkabel) und fixieren Sie die Platine beim Löten. Die Zeichnung mit
-der Pad-Nummerierung ist
-[`datasheets/CC2500_module_photo.jpeg`](datasheets/CC2500_module_photo.jpeg).
+Das kleine AliExpress-Modul hat neun flache Pads im Raster **1,27 mm** an einer 12 × 19 mm großen
+Platine. Sechs Leitungen (`SI`, `SCLK`, `SO`, `CSn`, `VDD`, `VSS`) werden direkt angelötet; verwenden
+Sie dünne Litze und fixieren Sie die Platine. Die Zeichnung mit Pad-Nummerierung ist
+[`datasheets/CC2500_module_photo.jpeg`](datasheets/CC2500_module_photo.jpeg). Das verifizierte
+TinyTronics-Modul besitzt bereits Stifte und lässt sich ohne Löten über Dupont-Buchsenleitungen mit
+dem ESP32 verbinden. Seine Pinreihenfolge ist anders — folgen Sie stets den Signalbeschriftungen.
 
 Prüfen Sie danach benachbarte Pads auf Kurzschlüsse: In diesem Raster ist eine Lötbrücke zwischen
 `SI`/`SCLK` oder `CSn`/`XO` der wahrscheinlichste Aufbaufehler.
@@ -87,10 +85,10 @@ Setzen Sie den gefundenen Port in den Beispielen unten anstelle von `/dev/cu.usb
 
 ## Schritt 2. Die ID der Fernbedienung ermitteln
 
-`remote_id` sind die vier Bytes, mit denen Ihre Fernbedienung jede Sendung kennzeichnet; die Leuchte
-hat sie sich bei der Kopplung im Werk oder beim Monteur gemerkt. Jede Fernbedienung hat ihre eigenen,
-deshalb **gibt es keinen Standardwert** — die ID muss aus dem Funk mitgehört werden. Das erledigt
-dasselbe CC2500-Modul, weitere Hardware ist nicht nötig.
+`remote_id` identifiziert den Sender: entweder als vier Byte lange ID im 14-Byte-Broadcast-Protokoll
+oder als drei Byte lange Anforderungsroute im adressierten 8-Byte-Protokoll. Jede Installation hat
+einen eigenen Wert; deshalb **gibt es keinen Standardwert** — er muss mit demselben CC2500-Modul aus
+dem Funk mitgehört werden.
 
 Flashen Sie die Sniffer-Konfiguration. `remote_id` ist darin absichtlich nicht gesetzt, das Gerät
 hört also nur zu und sendet nie:
@@ -115,9 +113,11 @@ Tastendruck erzeugt mehrere Zeilen im Log:
 
 ```
 [I][cc2500_emotion_sniffer]: remote 68049F25  cmd=0x01 (on)  val=0x80  RSSI=-38 dBm  LQI=2  offset=+3 kHz
+[I][cc2500_emotion_sniffer]: remote 68ABF2    cmd=0x01 (on)  val=0x7D  RSSI=-65 dBm  LQI=13 offset=-4 kHz
 ```
 
-`68049F25` ist die gesuchte ID. **Notieren Sie sie.**
+Gesucht sind die sechs oder acht Hex-Zeichen nach `remote`. **Notieren Sie sie.** Sechs Zeichen
+bedeuten, dass der Sniffer die kompakte 8-Byte-Variante erkannt und die Route normalisiert hat.
 
 Der Sniffer sieht jede Emotion-Fernbedienung in Empfangsreichweite, nicht nur Ihre (auch Nachbarn
 können solche Leuchten haben). Die eigene erkennen Sie am `RSSI`: Sie halten sie in der Hand, ihr
@@ -136,7 +136,7 @@ Datei, die nie in git landet. Legen Sie sie daneben an:
 # secrets.yaml
 wifi_ssid: "IhrNetzwerk"
 wifi_password: "Passwort"
-emotion_remote_id: "68049F25"                 # die ID aus Schritt 2
+emotion_remote_id: "68049F25"                 # ID oder Route aus Schritt 2
 ```
 
 Die Verbindung zu Home Assistant ist standardmäßig unverschlüsselt. Um sie zu verschlüsseln, erzeugen
@@ -241,16 +241,16 @@ Das Funkmodul antwortet nicht über SPI. Prüfen Sie der Reihe nach:
 - Ein anderes Programm belegt den Port (offener serieller Monitor, Arduino IDE) — schließen Sie es.
 
 ### Der Zustand in Home Assistant weicht von der Leuchte ab
-Das kommt vor: Es gibt keine Rückmeldung von der Leuchte, Home Assistant zeigt eine Schätzung. Es
-richtet sich bei der nächsten Aktion von selbst ein — oder sofort, wenn Sie eine Taste auf der
-physischen Fernbedienung drücken (der Empfang zieht den Zustand nach). Details in
+Der Zustand wird teilweise geschätzt, besonders die Helligkeit. Er richtet sich bei der nächsten
+Aktion oder einem Tastendruck der Fernbedienung ein; der 8-Byte-ED-12/30-1 sendet außerdem adressierte
+Antworten. Details stehen in
 [CONFIGURATION.de.md](CONFIGURATION.de.md#eigenschaften-und-einschränkungen).
 
-## Alternative: Kopplung statt ID-Klonen
+## Alternative für die 14-Byte-Variante: Kopplung statt ID-Klonen
 
 Das Klonen der Fernbedienungs-ID ist der empfohlene Weg: Die Leuchte gehorcht sofort, und
-Tastendrücke sind in Home Assistant sichtbar. Es geht aber auch umgekehrt — geben Sie dem Gerät eine
-**eigene** ID und koppeln Sie es mit der Leuchte:
+Tastendrücke sind in Home Assistant sichtbar. Bei der 14-Byte-Broadcast-Variante können Sie dem Gerät
+stattdessen eine **eigene** ID geben und es koppeln. Für die 8-Byte-Variante ist dies nicht verifiziert.
 
 1. Wählen Sie eine beliebige ID (4 Byte hex) und tragen Sie sie in `remote_id` ein.
 2. Versetzen Sie die Leuchte in den Lernmodus (laut L&S-Anleitung — meist eine gehaltene Taste am

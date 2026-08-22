@@ -5,8 +5,9 @@
 # Getting started: an L&S light in Home Assistant
 
 This guide goes from "I bought an ESP32" to "the light is controlled from Home Assistant". No
-ESPHome experience required, but you will need a soldering iron: the wires to the CC2500 module have
-to be soldered (details in step 0). Budget about an hour, most of which is the first firmware build.
+ESPHome experience is required. A CC2500 board with fitted header pins can be connected without
+soldering; the smaller pad-only board still needs six solder joints. Budget about an hour, most of
+which is the first firmware build.
 
 The idea is simple: **the ESP32 impersonates your remote.** It transmits the same commands with the
 same identifier, so the lamp obeys it immediately — no pairing, no modification of the lamp. That is
@@ -19,17 +20,16 @@ You will need:
 | What | Requirements | Notes |
 |---|---|---|
 | **ESP32** | Any board with USB | Verified on a DevKit V1 (ESP-WROOM-32) |
-| **CC2500 module** | 2.4 GHz, **26.000 MHz** crystal | [This one from AliExpress](https://de.aliexpress.com/item/1005005501196142.html) is verified. Sold as "CC2500 module 2.4G" |
-| **Soldering iron** | Ordinary, with a reasonably fine tip | Wires are soldered to the module; there is no connector |
-| Wires | 6, one end female for the ESP32 header | The other end gets soldered to the module |
+| **CC2500 module** | 2.4 GHz, **26.000 MHz** crystal | Verified choices: [small pad module](https://de.aliexpress.com/item/1005005501196142.html), or [TinyTronics module with header pins](https://www.tinytronics.nl/en/communication-and-signals/wireless/rf/modules/cc2500-wireless-rf-module-2.4ghz) |
+| **Soldering iron** | Optional | Needed only for a module without fitted pins |
+| Wires | 6 or 7 female Dupont jumpers | For the pad module, one end is soldered instead |
 
-⚠️ **The module has to be soldered.** Every CC2500 module found on the market (including the one
-linked above) comes without a pin header: nine flat pads along the bottom edge of a 12 × 19 mm board
-on a **1.27 mm** pitch. A 2.54 mm header does not fit that pitch, and no adapter is included — so
-wires go directly onto the pads. There are only six joints (`SI`, `SCLK`, `SO`, `CSn`, `VDD`,
-`VSS`), but they are small: use thin hookup wire (PTFE-insulated wire, or a strand pulled from a
-ribbon cable) and clamp the board while soldering. The drawing with pad numbering is
-[`datasheets/CC2500_module_photo.jpeg`](datasheets/CC2500_module_photo.jpeg).
+The small AliExpress board has nine flat pads along the bottom edge of a 12 × 19 mm board on a
+**1.27 mm** pitch. It needs six direct solder joints (`SI`, `SCLK`, `SO`, `CSn`, `VDD`, `VSS`);
+use thin hookup wire and clamp the board while soldering. The drawing with pad numbering is
+[`datasheets/CC2500_module_photo.jpeg`](datasheets/CC2500_module_photo.jpeg). The verified
+TinyTronics board has fitted pins, so female Dupont jumpers connect it to the ESP32 without soldering.
+Its pin order is different: always follow the signal labels printed on your board.
 
 When you are done, check neighbouring pads for shorts: at this pitch a solder bridge between
 `SI`/`SCLK` or `CSn`/`XO` is the single most likely assembly mistake.
@@ -83,9 +83,10 @@ Substitute the port you found for `/dev/cu.usbserial-0001` in the examples below
 
 ## Step 2. Find your remote's ID
 
-`remote_id` is the four bytes your remote stamps on every transmission; the lamp memorized them when
-it was paired at the factory or by the installer. Every remote has its own, so **there is no default
-value** — it has to be sniffed off the air. The same CC2500 module does that, nothing else needed.
+`remote_id` identifies the transmitter. It is either a four-byte ID in the 14-byte broadcast
+protocol, or a three-byte request route in the 8-byte addressed protocol. Every installation has its
+own value, so **there is no default** — it has to be sniffed off the air. The same CC2500 module does
+that; nothing else is needed.
 
 Flash the sniffer config. `remote_id` is deliberately unset in it, so the device only listens and
 never transmits:
@@ -110,9 +111,11 @@ lines into the log:
 
 ```
 [I][cc2500_emotion_sniffer]: remote 68049F25  cmd=0x01 (on)  val=0x80  RSSI=-38 dBm  LQI=2  offset=+3 kHz
+[I][cc2500_emotion_sniffer]: remote 68ABF2    cmd=0x01 (on)  val=0x7D  RSSI=-65 dBm  LQI=13 offset=-4 kHz
 ```
 
-`68049F25` is the ID you are after. **Write it down.**
+The six- or eight-digit value after `remote` is what you are after. **Write it down.** A six-digit
+value means the sniffer found the compact 8-byte variant and normalized its request/response route.
 
 The sniffer sees every Emotion remote in range, not just yours (your neighbours may have these
 lights too). Yours is identified by `RSSI`: it is in your hand, so its signal is noticeably
@@ -131,7 +134,7 @@ that never lands in git. Create it alongside:
 # secrets.yaml
 wifi_ssid: "YourNetwork"
 wifi_password: "password"
-emotion_remote_id: "68049F25"                 # the ID from step 2
+emotion_remote_id: "68049F25"                 # the ID or route from step 2
 ```
 
 The Home Assistant connection is unencrypted by default. To encrypt it, generate a key:
@@ -236,16 +239,15 @@ The radio is not answering over SPI. Check, in order:
 - Another program is holding the port (an open serial monitor, Arduino IDE) — close it.
 
 ### The state in Home Assistant disagrees with the lamp
-That happens: there is no feedback from the lamp, so Home Assistant shows an estimate. It realigns
-by itself on the next action — or immediately if you press a button on the physical remote (reception
-pulls the state in). Details in
+The state is partly estimated, especially brightness. It realigns on the next action or when you
+press the physical remote; the 8-byte ED 12/30-1 also sends addressed replies. Details are in
 [CONFIGURATION.md](CONFIGURATION.md#features-and-limitations).
 
-## Alternative: pairing instead of cloning an ID
+## Alternative for the 14-byte variant: pairing instead of cloning an ID
 
 Cloning the remote's ID is the recommended path: the lamp obeys immediately and remote presses are
-visible in Home Assistant. But you can do the opposite — give the device its **own** ID and pair it
-with the lamp:
+visible in Home Assistant. On the 14-byte broadcast variant you can instead give the device its
+**own** ID and pair it with the lamp. This has not been verified for the 8-byte variant.
 
 1. Pick any ID (4 bytes hex) and put it in `remote_id`.
 2. Put the lamp into learning mode (per the L&S manual — usually holding a button on the receiver).

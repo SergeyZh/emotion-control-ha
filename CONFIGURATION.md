@@ -40,7 +40,7 @@ cc2500_emotion:
   id: emotion
   cs_pin: GPIO5
   gdo0_pin: GPIO4         # optional
-  remote_id: "68049F25"   # your remote's ID (4 bytes hex)
+  remote_id: "68049F25"   # 4-byte ID, or a 3-byte compact route such as "68ABF2"
   receive: true           # listen to the air and sync state
   step_interval: 200ms    # pause between brightness step transmissions
 
@@ -67,7 +67,7 @@ declare several hubs if you want (two modules on separate SPI buses).
 |---|---|---|
 | `cs_pin` | — (**required**) | CS pin (the module's `CSn`) |
 | `gdo0_pin` | — (opt.) | `GDO0`, used to detect end of transmission. Without it, the `MARCSTATE` register is polled |
-| `remote_id` | — (opt.) | Remote ID: 4 bytes hex, `"68049F25"` or `"68:04:9F:25"`. **Without it transmission is disabled** and the device only listens |
+| `remote_id` | — (opt.) | Remote ID/route: 3 or 4 bytes hex, for example `"68ABF2"` or `"68049F25"`. Three bytes select the compact addressed protocol; four select the broadcast protocol. **Without it transmission is disabled** and the device only listens |
 | `receive` | `true` | Keep the chip in receive mode: commands from the physical remote update the state in Home Assistant |
 | `step_interval` | `200ms` | Pause between individual brightness step transmissions |
 | `id` | (auto) | Identifier used by `light` and by lambdas |
@@ -79,10 +79,20 @@ make everyone else's device transmit under the author's ID — that is, control 
 So the option is optional and has no default: if it is unset the component refuses to transmit (with
 an error in the log) and works as a receiver. How to find your ID — [SNIFFER.md](SNIFFER.md).
 
-**What `step_interval` is for.** The lamp collapses brightness steps that arrive back to back
-(~14 ms) into one. So steps go through a non-blocking queue: one transmission per `step_interval`.
-If your lamp drops steps when the slider moves fast, increase it; if sweeping across all levels feels
-slow, decrease it.
+The length of `remote_id` selects the protocol automatically:
+
+| Variant | `remote_id` | Frame | Verified setup |
+|---|---|---|---|
+| Broadcast | 4 bytes / 8 hex digits | 14-byte payload | Original Emotion remote/lamp |
+| Compact addressed | 3 bytes / 6 hex digits: `68`, remote address, driver address | 8-byte request and response | Two-button remote with **L&S Emotion Driver ED 12/30-1** |
+
+Do not copy the example `68ABF2`: it was one captured installation. Run the sniffer and use the
+six- or eight-digit value it reports for your own system.
+
+**What `step_interval` is for.** On the broadcast variant, the lamp collapses brightness steps that
+arrive back to back, so the queue sends one native step per interval. The compact variant has no
+step command: one logical HA step becomes a repeated `0x10`/`0x20` ramp lasting `step_interval`,
+followed by `0x40`. Increase it for larger compact brightness changes or decrease it for smaller ones.
 
 ### Public methods (for lambdas)
 
@@ -90,12 +100,12 @@ Available as `id(emotion).…` inside any `lambda`:
 
 | Method | Action |
 |---|---|
-| `send_on(uint8_t color_temp)` | Turn on at the given color temperature (`0x80` is the middle) |
+| `send_on(uint8_t color_temp)` | Turn on at the given color temperature (`0x80` is the middle). Compact mode sends ON, then a separate color-temperature command |
 | `send_off()` | Turn off |
 | `send_color_temp(uint8_t value)` | Color temperature: `0x00` warm … `0xFF` cold |
 | `brightness_step(int direction)` | Brightness step: `1` brighter, `-1` dimmer. Updates both the lamp and the state in Home Assistant. Always transmits, even at an end stop (resyncs UI ↔ lamp) |
 | `send_brightness_up()` / `send_brightness_down()` | A brightness step that bypasses Home Assistant state — transmit only, trackers untouched |
-| `send_pair()` | Pairing — announce our `remote_id` to a lamp in learning mode |
+| `send_pair()` | Pairing — announce our `remote_id` to a lamp in learning mode. Verified only for the 14-byte broadcast variant |
 | `send_raw(uint8_t cmd, uint8_t val)` | Arbitrary command — for protocol experiments |
 
 For buttons in Home Assistant use `brightness_step()`: it keeps HA state and the lamp together. It
@@ -109,7 +119,7 @@ An ordinary ESPHome light of type `COLOR_TEMPERATURE`.
 | Option | Default | Description |
 |---|---|---|
 | `cc2500_emotion_id` | (auto) | Reference to the `cc2500_emotion` hub |
-| `brightness_levels` | `5` | Number of discrete brightness levels the lamp has (2…32) |
+| `brightness_levels` | `5` | Number of logical brightness levels exposed to HA (2…32) |
 | `ramp_duration` | `1000ms` | Time for a full min↔max brightness ramp — used to estimate a held button on the remote |
 | `cold_white_color_temperature` | `6500 K` | Cold end of the range |
 | `warm_white_color_temperature` | `2700 K` | Warm end of the range |
@@ -120,11 +130,10 @@ An ordinary ESPHome light of type `COLOR_TEMPERATURE`.
 Plus the standard `light` keys (`name`, `icon`, `id`, …).
 
 **About brightness.** Home Assistant always attaches a brightness slider to any entity that has
-color temperature — "color temperature without brightness" is impossible on a single light. So the
-model is absolute: the component tracks the current level and steps the difference when it changes,
-without flicker. Five levels are presented as **1 / 25 / 50 / 75 / 100 %** (the bottom one is pinned
-to 1 % because 0 % means "off" in Home Assistant). At the end stops one extra step is sent as
-headroom — the lamp clamps, and that is a resynchronization point.
+color temperature. The component tracks a configurable number of logical levels; five appear as
+**1 / 25 / 50 / 75 / 100 %**. Broadcast devices move between them with native `0x11`/`0x21`
+steps. Compact devices have only continuous ramps, so a logical step is approximated with a short
+timed `0x10`/`0x20` hold and a `0x40` stop. Compact brightness is therefore approximate.
 
 **About `restore_mode`.** The default is overridden from the base `ALWAYS_OFF`, which lost the state
 on every reboot. The restored state is **not transmitted to the lamp**: it remembers its own, and
@@ -188,7 +197,7 @@ stop: if Home Assistant and the lamp have drifted apart, this is how you nudge t
 | Entity | What it does |
 |---|---|
 | **Light** "L&S Emotion" | On/off, brightness (5 levels → 1/25/50/75/100 %), color temperature |
-| **Button** "Pair" | Announce `remote_id` to a lamp in learning mode |
+| **Button** "Pair" | Announce `remote_id` to a lamp in learning mode (broadcast variant verified only) |
 | **Button** "Brighter" / "Dimmer" | One brightness step, always transmitted |
 | **Button** "Raw send" | Send the command from the fields below |
 | **Text** "Raw cmd (hex)" / "Raw value (hex)" | The bytes for "Raw send" |
@@ -199,14 +208,13 @@ temperature exactly, brightness by steps or by ramp estimate.
 
 ## Features and limitations
 
-- **There is no feedback from the lamp.** The protocol is one-way: the lamp never answers. The state
-  in Home Assistant is an estimate. Trustworthy anchors: absolute commands (on/off, color
-  temperature), the brightness end stops, and commands received from the remote.
-- **Brightness has 5 discrete levels.** The slider quantizes to 1/25/50/75/100 %. Sweeping end to end
-  takes up to ~1 s because steps go out one at a time, spaced by `step_interval`.
-- **The remote sends brightness commands as singles** (unlike on/off, which is repeated five times),
-  so an individual transmission is occasionally lost in the air. This self-corrects at the end stops
-  and on the next action.
+- **Feedback differs by variant.** The broadcast lamp never answers, so Home Assistant holds an
+  estimate. The compact ED 12/30-1 replies to addressed requests (with the endpoint bytes swapped),
+  but it does not broadcast independent state changes. Physical-remote traffic updates HA in both.
+- **Brightness is logical, not necessarily native.** The default five levels map to
+  1/25/50/75/100 %. Broadcast uses native steps; compact uses timed ramps and is approximate.
+- **Broadcast brightness steps are single transmissions** and may occasionally be lost. Compact
+  ramps repeat their start command while active and finish with `0x40`.
 - **A held button on the remote** (`0x10`/`0x20`, stopped by `0x40`) is estimated from elapsed time
   via `ramp_duration` — that is, approximately. If the `0x40` is lost, the ramp is finalized by
   timeout.
@@ -222,27 +230,27 @@ temperature exactly, brightness by steps or by ramp estimate.
 
 | cmd | Action | val |
 |---|---|---|
-| `0x01` | Turn on | current color temperature |
+| `0x01` | Turn on | broadcast: current color temperature; compact request: `0x00` |
 | `0x02` | Turn off | `0x00` |
-| `0x11` / `0x21` | Brightness one step up / down | `0x00` |
-| `0x10` / `0x20` | Start a smooth ramp up / down (~1 s end to end) | `0x00` |
+| `0x11` / `0x21` | Brightness one step up / down (broadcast only) | `0x00` |
+| `0x10` / `0x20` | Start a smooth ramp up / down | `0x00` |
 | `0x40` | Stop the ramp | `0x00` |
 | `0x50` | Color temperature (`0x00` warm … `0xFF` cold) | level |
-| `0x60` | Pairing | `0x00` |
+| `0x60` | Pairing (verified on broadcast only) | `0x00` |
 
 ⚠️ `0x10`/`0x20` are **not** an instant maximum/minimum but the start of a smooth ramp: the final
-level depends on when the `0x40` arrives. The component never transmits them — it reaches the end
-stops with steps plus headroom instead. On reception it does recognize them: that is what the remote
-sends while a button is held.
+level depends on when `0x40` arrives. The broadcast path uses `0x11`/`0x21` steps for transmission;
+the compact path deliberately transmits timed ramps because it has no observed step commands.
 
 Holding a button on the remote is not a single transmission but a stream: `0x10`/`0x20` repeat about
 **every 12 ms** for as long as the button is down, ending with a single `0x40`.
 
-Commands outside this table are logged by the sniffer as `UNKNOWN` together with all 14 frame bytes —
-so if your remote can do something more, you will see it immediately and can try reproducing it via
-"Raw send".
+Commands outside this table are logged by the sniffer as `UNKNOWN` together with all 8 or 14 frame
+bytes, so a new command can be captured and tried through "Raw send".
 
-### Frame format
+### Frame formats
+
+Broadcast variant (the length byte precedes the 14-byte payload in the CC2500 FIFO):
 
 ```
 0E | ID₀ ID₁ ID₂ ID₃ | cmd | val | 00 00 00 00 00 00 | chk | 16
@@ -250,8 +258,19 @@ so if your remote can do something more, you will see it immediately and can try
 
 `0E` is the length (14 bytes), `chk = 0x7E ⊕ ID₀ ⊕ ID₁ ⊕ ID₂ ⊕ ID₃ ⊕ 0x16 ⊕ cmd ⊕ val`.
 
+Compact addressed variant:
+
+```
+08 | 68 | REMOTE | DRIVER | cmd | 00 | val | chk | 16   request
+08 | 68 | DRIVER | REMOTE | cmd | 01 | val | chk | 16   response
+```
+
+The driver swaps the endpoint bytes in its reply and sets the direction byte to `01`. The configured
+three-byte route is always the request order `68 REMOTE DRIVER`; received responses are normalized
+to that order. For both compact directions, `chk` is `0x7E` XOR every payload byte except `chk`.
+
 Modulation (MSK, 250 kBaud, 2436.2 MHz), the `0xD391` sync word, FEC and the CRC are all handled by
-the CC2500 in hardware from the loaded register map — the software only prepares these 14 bytes.
+the CC2500 in hardware from the loaded register map — the software prepares the 8- or 14-byte payload.
 
 The complete protocol analysis — RF parameters, all 45 registers, `PATABLE`, the reverse-engineering
 method — is in

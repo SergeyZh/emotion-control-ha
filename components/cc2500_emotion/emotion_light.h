@@ -185,10 +185,9 @@ class EmotionControlLight : public light::LightOutput {
            frac * (this->warm_white_temperature_ - this->cold_white_temperature_);
   }
 
-  // Move the lamp to a level with relative step commands (0x11/0x21), queued and paced
-  // by the hub. 0x10/0x20 are NOT used - they are ramps, not instant ends. At the ends
-  // we queue one extra step (the lamp clamps) so the floor/ceiling is reached even if
-  // our tracking drifted by 1.
+  // Move the lamp to a level through the hub's queued relative steps. Broadcast
+  // remotes use 0x11/0x21; compact remotes turn each step into a timed 0x10/0x20
+  // ramp plus 0x40 stop. At the ends we queue one extra step so the lamp clamps.
   void set_level_(int target) {
     const int span = this->brightness_levels_ - 1;
     int steps;

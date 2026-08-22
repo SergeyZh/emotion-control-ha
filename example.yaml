@@ -37,9 +37,9 @@ cc2500_emotion:
   id: emotion
   cs_pin: GPIO5
   gdo0_pin: GPIO4
-  # Your remote's ID, 4 bytes hex. Required for transmitting; without it the
-  # device only listens to the air. To find your remote's ID, flash sniffer.yaml
-  # and press any button on it.
+  # Your remote's ID: a 14-byte protocol ID (4 bytes hex) or a compact-protocol
+  # route (3 bytes hex). Required for transmitting; without it the device only
+  # listens to the air. Find it with sniffer.yaml.
   remote_id: !secret emotion_remote_id
   # remote_id: "00000000"
 

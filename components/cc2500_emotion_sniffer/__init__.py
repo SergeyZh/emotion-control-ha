@@ -28,7 +28,7 @@ CONFIG_SCHEMA = cv.Schema(
     {
         cv.GenerateID(): cv.declare_id(CC2500Sniffer),
         cv.GenerateID(CONF_CC2500_EMOTION_ID): cv.use_id(CC2500Emotion),
-        # Log the full 14-byte frame for every command, not just unknown ones.
+        # Log the full 8- or 14-byte frame for every command, not just unknown ones.
         cv.Optional(CONF_DUMP_RAW, default=False): cv.boolean,
         # Fires once per press, for any remote in range.
         cv.Optional(CONF_ON_FRAME): automation.validate_automation(
