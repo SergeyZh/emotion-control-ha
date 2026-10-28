@@ -15,6 +15,11 @@ Die Leuchte erscheint in Home Assistant als gewöhnliches Licht: ein/aus, Hellig
 separaten Repository entschlüsselt:
 [`emotion-control-re`](https://github.com/SergeyZh/emotion-control-re).
 
+**Älteres „Bielefeld“-System?** Hat Ihre Fernbedienung 8 Tasten (Sonne, Schneeflocke, 1–4, Ein, Aus —
+Platine `TxD8 LUS_RC24`) und steuert eine „Emotion 4-Kanal Steuerung Bielefeld“, verwendet sie ein
+anderes, inkompatibles Protokoll (2433 MHz, 2-FSK, ca. 10 kBaud). Siehe
+[`emotion-control-bielefeld`](https://github.com/fewall/emotion-control-bielefeld).
+
 ## Funktionen
 - **Ein/Aus** und **Farbtemperatur** (warm ↔ kalt).
 - **Helligkeit** — die 5 Stufen der Leuchte als normaler Schieberegler in Home Assistant.

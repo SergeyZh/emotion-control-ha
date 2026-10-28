@@ -14,6 +14,11 @@ The lamp appears in Home Assistant as an ordinary light: on/off, brightness, col
 **Status: working**, verified against a real lamp. The protocol was reverse-engineered in a separate
 repository, [`emotion-control-re`](https://github.com/SergeyZh/emotion-control-re).
 
+**Older "Bielefeld" system?** If your remote has 8 buttons (sun, snowflake, 1–4, on, off — PCB
+`TxD8 LUS_RC24`) and drives an "Emotion 4-Kanal Steuerung Bielefeld", it uses a different,
+incompatible protocol (2433 MHz, 2-FSK, ~10 kBaud). See
+[`emotion-control-bielefeld`](https://github.com/fewall/emotion-control-bielefeld).
+
 ## Features
 - **On/off** and **color temperature** (warm ↔ cold).
 - **Brightness** — the lamp's 5 levels exposed as a normal Home Assistant slider.
