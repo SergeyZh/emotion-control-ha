@@ -110,10 +110,24 @@ void CC2500Emotion::setup() {
     this->enter_rx_();
     // MARCSTATE 0x0D = RX. Anything else means the chip did not actually start
     // listening, which is otherwise invisible until packets fail to arrive.
-    const uint8_t marcstate = this->read_status_(CC2500_MARCSTATE) & 0x1F;
-    ESP_LOGCONFIG(TAG, "Listening for remote commands (RX enabled, MARCSTATE=0x%02X).", marcstate);
+    // MCSM0 FS_AUTOCAL=01 calibrates the synthesizer on every IDLE->RX transition
+    // (~800 us), so a read right after SRX sees STARTCAL (0x08) or another
+    // calibration state. Poll for up to 2 ms instead of reading once.
+    // Note: MARCSTATE must be read via read_status_() (burst bit set) - a plain
+    // single read of 0x35 would be interpreted as the STX command strobe.
+    uint8_t marcstate = 0;
+    uint8_t polls = 0;
+    for (; polls < 20; polls++) {
+      marcstate = this->read_status_(CC2500_MARCSTATE) & 0x1F;
+      if (marcstate == 0x0D)
+        break;
+      delayMicroseconds(100);
+    }
+    ESP_LOGCONFIG(TAG, "Listening for remote commands (RX enabled, MARCSTATE=0x%02X after ~%u us).",
+                  marcstate, polls * 100U);
     if (marcstate != 0x0D)
-      ESP_LOGW(TAG, "Chip is not in RX state (MARCSTATE=0x%02X, expected 0x0D).", marcstate);
+      ESP_LOGW(TAG, "Chip is not in RX state after 2 ms (MARCSTATE=0x%02X, expected 0x0D).",
+               marcstate);
   }
 }
 
